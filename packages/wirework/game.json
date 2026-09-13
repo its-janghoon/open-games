@@ -11,6 +11,7 @@
   ],
   "status": "playable",
   "thumbnail": "thumb.png",
+  "hero": "hero.png",
   "focus": "active",
   "focusNote": "Bounded 8-wave arcade run with desktop+touch parity - the one title targeted at web-game portals."
 }

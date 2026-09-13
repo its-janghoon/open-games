@@ -26,7 +26,7 @@ const REQUIRED_STRINGS = ['slug', 'title'];
  * value for something nobody has decided yet.
  */
 const REQUIRED_WHEN_PLAYABLE = ['genre', 'summary'];
-const OPTIONAL_STRINGS = ['titleKo', 'summaryKo', 'thumbnail'];
+const OPTIONAL_STRINGS = ['titleKo', 'summaryKo', 'thumbnail', 'hero'];
 
 /**
  * Directories under `packages/` that are not games. Anything starting with an
@@ -69,6 +69,9 @@ function validate(meta, dir, metaPath) {
   }
   if (meta.thumbnail && !existsSync(join(packagesDir, dir, meta.thumbnail))) {
     problems.push(`"thumbnail" points at ${meta.thumbnail}, which does not exist in the package`);
+  }
+  if (meta.hero && !existsSync(join(packagesDir, dir, meta.hero))) {
+    problems.push(`"hero" points at ${meta.hero}, which does not exist in the package`);
   }
 
   if (problems.length > 0) {
