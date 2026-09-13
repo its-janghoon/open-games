@@ -21,6 +21,37 @@ interface PhaserGameProps {
 
 const GAME_WIDTH = 900;
 const GAME_HEIGHT = 640;
+/**
+ * Widest surface we will grow to. The world diamond is projected at a FIXED
+ * 900x640 (DEFAULT_PROJECTION), so a wider surface reveals more map either side
+ * rather than magnifying - past roughly 2.6:1 that is just void, so clamp.
+ */
+const MAX_GAME_WIDTH = 1680;
+
+/**
+ * Surface size for the live container.
+ *
+ * The canvas used to be a FIXED 900x640 fed to a plain `Scale.FIT`, which on a
+ * wide desktop displayed the whole game as a ~900px island inside a ~1900px
+ * viewport (measured 47% width fill) while every sibling game filled 100%. FIT
+ * only letterboxes when the SURFACE aspect differs from the CONTAINER aspect,
+ * so instead of scaling a 1.41:1 surface into a 2.5:1 box we grow the surface
+ * to the container's own aspect at a fixed 640 logical height. FIT then has
+ * nothing to letterbox, and because the world projection is independent of the
+ * surface the extra width shows more lane instead of stretching anything.
+ * Mirrors the shared `resolveViewportPlan` approach the other four games use.
+ */
+function surfaceFor(container: HTMLElement): { width: number; height: number } {
+  const rect = container.getBoundingClientRect();
+  if (!(rect.width > 0) || !(rect.height > 0)) {
+    return { width: GAME_WIDTH, height: GAME_HEIGHT };
+  }
+  const width = Math.round(GAME_HEIGHT * (rect.width / rect.height));
+  return {
+    width: Math.min(MAX_GAME_WIDTH, Math.max(GAME_WIDTH, width)),
+    height: GAME_HEIGHT,
+  };
+}
 const FONT_TIMEOUT_MS = 1800;
 const FIRST_RENDER_TIMEOUT_MS = 500;
 const STARTUP_WATCHDOG_MS = 6500;
@@ -93,7 +124,17 @@ export default function PhaserGame({
     const motionQuery = window.matchMedia?.(REDUCED_MOTION_QUERY) ?? null;
 
     const preventContextMenu = (event: Event) => event.preventDefault();
-    const refresh = () => game?.scale.refresh();
+    // Re-derive the surface from the live container so a resize keeps FIT
+    // aspect-matched (and therefore keeps filling) instead of re-letterboxing.
+    const refresh = () => {
+      if (!game || !container.isConnected) return;
+      const next = surfaceFor(container);
+      const size = game.scale.gameSize;
+      if (size.width !== next.width || size.height !== next.height) {
+        game.scale.resize(next.width, next.height);
+      }
+      game.scale.refresh();
+    };
 
     const finishReady = () => {
       if (cancelled || startupSettled) return;
@@ -155,22 +196,34 @@ export default function PhaserGame({
         onGameEnd: (outcome) => onGameEndRef.current(outcome),
       };
 
+      const surface = surfaceFor(container);
       game = new Phaser.Game({
         type: Phaser.AUTO,
         parent: container,
-        width: GAME_WIDTH,
-        height: GAME_HEIGHT,
+        width: surface.width,
+        height: surface.height,
         backgroundColor: '#071018',
         scale: {
           mode: Phaser.Scale.FIT,
           autoCenter: Phaser.Scale.CENTER_BOTH,
-          width: GAME_WIDTH,
-          height: GAME_HEIGHT,
+          width: surface.width,
+          height: surface.height,
         },
-        render: { antialias: true, roundPixels: true },
+        // roundPixels MUST stay false: FIT displays the surface at a
+        // NON-INTEGER scale, and snapping draw positions to integers under a
+        // fractional resample shifts centred art off-centre and makes the
+        // lerped camera scroll stair-step (the world visibly shook). lastwar
+        // documents the same trap.
+        render: { antialias: true, roundPixels: false },
         scene: [BattleScene],
       });
       gameRef.current = game;
+      // QA/debug hook: expose the running game only when explicitly requested
+      // via ?debug in the URL, so screenshot/e2e tooling can introspect scene
+      // state. No effect on the normal production page (no query flag).
+      if (typeof location !== 'undefined' && location.search.includes('debug')) {
+        (globalThis as unknown as { __GAME__?: Phaser.Game }).__GAME__ = game;
+      }
       game.scene.start('battle', sceneData);
 
       canvas = game.canvas;

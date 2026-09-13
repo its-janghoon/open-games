@@ -60,6 +60,11 @@ export const GRAPPLE = {
   RELEASE_RADIAL_BOOST: 70,
   WIRE_THICKNESS: 1,
   WIRE_COLOR: 0xdfe6ef,
+  /** Aim-preview ring: where the hook would anchor for the current aim. */
+  PREVIEW_COLOR: 0x9fd8ff,
+  /** Brighter ring when the aim would snap to an enemy cooling NODE. */
+  PREVIEW_NODE_COLOR: 0x59e6ff,
+  PREVIEW_RADIUS: 6,
   ANCHOR_RADIUS: 2,
   NODE_ANCHOR_SNAP_DIST: 34,
   NODE_PULL_ACCEL: 1150,

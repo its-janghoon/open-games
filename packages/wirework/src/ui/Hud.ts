@@ -12,7 +12,7 @@ export interface HudState {
   outerRatio: number; innerRatio: number;
   outerBreaches: readonly boolean[]; innerBreaches: readonly boolean[];
   citizensSaved: number; citizensTotal: number; wave: number; totalWaves: number; score: number;
-  activeMs: number; wavePhase: WavePhase; countdownMs: number; inputMode: 'keyboard' | 'gamepad';
+  activeMs: number; wavePhase: WavePhase; countdownMs: number; inputMode: 'keyboard' | 'gamepad' | 'touch';
   edgeThreats: readonly { screenX: number; screenY: number }[];
 }
 export interface WeakPointCue {
@@ -38,24 +38,41 @@ export class Hud {
   private readonly anchored: { obj: Phaser.GameObjects.GameObject & { x: number; y: number }; ox: number; oy: number }[] = [];
   private static readonly BAR_W = 168;
   private static readonly BAR_H = 12;
+  /** Gap between a row's label baseline box and the bar beneath it. */
+  private static readonly LABEL_GAP = 4;
+  /** Top of the first row, and the vertical pitch between rows. */
+  private static readonly ROW_TOP = 10;
+  private static readonly ROW_PITCH = 36;
   private static readonly DEPTH = 50;
 
   constructor(private readonly scene: Phaser.Scene) {
     this.reducedMotion = prefersReducedMotion(AudioManager.get(scene).getSettings());
     const start = scene.children.list.length;
-    const bar = (y: number, color: number, label: string): Phaser.GameObjects.Rectangle => {
-      scene.add.rectangle(12, y, Hud.BAR_W, Hud.BAR_H, PALETTE.WALL_DARK).setOrigin(0, 0.5).setDepth(Hud.DEPTH);
-      const fill = scene.add.rectangle(12, y, Hud.BAR_W, Hud.BAR_H, color).setOrigin(0, 0.5).setDepth(Hud.DEPTH + 1);
-      this.labels.push(scene.add.text(12, y + 10, label, textStyle(14)).setDepth(Hud.DEPTH + 1));
-      return fill;
+    /**
+     * One gauge row: the LABEL first, then its bar underneath. Reading order is
+     * name-then-value, so the label must sit above the bar it names - otherwise
+     * each bar appears to belong to the label below it and the topmost bar reads
+     * as unlabelled. The bar offset is derived from the label's measured height
+     * rather than a magic number, so changing the font size cannot desync them.
+     */
+    const row = (index: number, color: number, label: string): Phaser.GameObjects.Rectangle => {
+      const top = Hud.ROW_TOP + index * Hud.ROW_PITCH;
+      const text = scene.add.text(12, top, label, textStyle(14)).setDepth(Hud.DEPTH + 1);
+      this.labels.push(text);
+      const barY = top + text.height + Hud.LABEL_GAP + Hud.BAR_H / 2;
+      scene.add.rectangle(12, barY, Hud.BAR_W, Hud.BAR_H, PALETTE.WALL_DARK).setOrigin(0, 0.5).setDepth(Hud.DEPTH);
+      return scene.add.rectangle(12, barY, Hud.BAR_W, Hud.BAR_H, color).setOrigin(0, 0.5).setDepth(Hud.DEPTH + 1);
     };
-    this.hpBar = bar(16, PALETTE.CITIZEN, tr('hud.hp'));
-    this.gasBar = bar(52, PALETTE.PLAYER, tr('hud.charge'));
-    this.outerBar = bar(88, PALETTE.ACCENT, tr('hud.outer'));
-    this.innerBar = bar(124, PALETTE.ACCENT, tr('hud.inner'));
+    this.hpBar = row(0, PALETTE.CITIZEN, tr('hud.hp'));
+    this.gasBar = row(1, PALETTE.PLAYER, tr('hud.charge'));
+    this.outerBar = row(2, PALETTE.ACCENT, tr('hud.outer'));
+    this.innerBar = row(3, PALETTE.ACCENT, tr('hud.inner'));
     this.statusText = scene.add.text(CANVAS.WIDTH - 12, 16, '', textStyle(16, { align: 'right' })).setOrigin(1, 0).setDepth(Hud.DEPTH + 1);
     this.phaseText = scene.add.text(CANVAS.WIDTH / 2, 16, '', textStyle(15, { align: 'center' })).setOrigin(0.5, 0).setDepth(Hud.DEPTH + 1);
-    this.warningText = scene.add.text(12, 151, '', textStyle(14, { color: PALETTE.DANGER_CSS })).setDepth(Hud.DEPTH + 1);
+    // Sits just under the last row's BAR. Derived rather than hardcoded: with the
+    // label now above its bar, each row is taller at the bottom, and the old
+    // fixed y overlapped the innermost gauge.
+    this.warningText = scene.add.text(12, this.innerBar.y + Hud.BAR_H / 2 + Hud.LABEL_GAP, '', textStyle(14, { color: PALETTE.DANGER_CSS })).setDepth(Hud.DEPTH + 1);
     this.waveBanner = scene.add.text(CANVAS.WIDTH / 2, CANVAS.HEIGHT * 0.35, '', textStyle(32, { color: PALETTE.DANGER_CSS, fontStyle: 'bold', align: 'center' })).setOrigin(0.5).setDepth(Hud.DEPTH + 2).setAlpha(0);
     this.hint = scene.add.text(CANVAS.WIDTH / 2, CANVAS.HEIGHT - 16, tr('hud.hint'), textStyle(14)).setOrigin(0.5, 1).setDepth(Hud.DEPTH + 1).setAlpha(0.4);
     this.ringGfx = scene.add.graphics().setDepth(Hud.DEPTH + 1);
@@ -114,7 +131,8 @@ export class Hud {
     this.statusText.setText(tr('hud.status', {
       score: state.score, wave: state.wave, total: state.totalWaves,
       saved: state.citizensSaved, citizensTotal: state.citizensTotal,
-      time: (state.activeMs / 1000).toFixed(1), input: state.inputMode === 'gamepad' ? 'PAD' : 'KBM',
+      time: (state.activeMs / 1000).toFixed(1),
+      input: state.inputMode === 'gamepad' ? 'PAD' : state.inputMode === 'touch' ? 'TCH' : 'KBM',
     }));
     this.phaseText.setText(state.wavePhase === 'countdown'
       ? tr('hud.countdown', { seconds: Math.ceil(state.countdownMs / 1000) })

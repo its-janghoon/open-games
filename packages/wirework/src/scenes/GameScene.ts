@@ -13,11 +13,14 @@ import { aabbIntersects, isTraversing } from '../systems/SiegeGeometry';
 import { WaveSystem } from '../systems/WaveSystem';
 import { AudioManager } from '../systems/AudioManager';
 import { Hud } from '../ui/Hud';
+import { textStyle } from '../ui/UiText';
+import { tr } from '../i18n/i18n';
 import type { GameOverData } from './GameOverScene';
 import type { LoseReason } from './GameOverReason';
 import { SeededRng, createRunSeed } from '../systems/DeterministicRng';
-import { prefersReducedMotion, saveRunRecord, type Difficulty, type GameSettings } from '../systems/Persistence';
+import { prefersReducedMotion, saveRunRecord, saveSettings, type Difficulty, type GameSettings } from '../systems/Persistence';
 import { AttackTarget, DebrisProjectile, type AttackEvent, type Enemy, type EnemyContext, type StructureTarget } from '../entities/enemies';
+import { TouchControls, touchAvailable } from '../systems/TouchControls';
 
 export interface GameSceneData { difficulty?: Difficulty; seed?: number }
 type Outcome = LoseReason | 'victory';
@@ -73,7 +76,13 @@ export class GameScene extends Phaser.Scene {
   private gamepadPauseHeld = false;
   private gamepadInputArmed = true;
   private simulationActions: SimulationAction[] = [];
-  private lastInputMode: 'keyboard' | 'gamepad' = 'keyboard';
+  /** Touch scheme; null on a device with no touch support. */
+  private touch: TouchControls | null = null;
+  /** Tether onboarding stage; 'off' once completed or skipped. */
+  private tutorialStage: 'off' | 'hold' | 'release' = 'off';
+  private tutorialText: Phaser.GameObjects.Text | null = null;
+  private tutorialSkipText: Phaser.GameObjects.Text | null = null;
+  private lastInputMode: 'keyboard' | 'gamepad' | 'touch' = 'keyboard';
   private focusLossHandler = (): void => this.handleFocusLoss();
   private visibilityHandler = (): void => { if (document.hidden) this.handleFocusLoss(); };
 
@@ -124,8 +133,82 @@ export class GameScene extends Phaser.Scene {
     this.hud = new Hud(this);
     this.hud.showHint();
     this.combat.setEnemies(this.enemies);
-    this.waves.start(this.simulationMs);
+    // Gate wave 1 behind the tether onboarding on a first run. The tether is
+    // hold-to-use and is the whole game; letting machines spawn while the player
+    // is still discovering that a click does nothing is how a first session ends
+    // in a bounce. Returning players (flag persisted) start immediately.
+    if (this.settings.tetherTutorialDone) {
+      this.waves.start(this.simulationMs);
+    } else {
+      this.startTetherTutorial();
+    }
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.shutdown());
+  }
+
+  /**
+   * TETHER ONBOARDING.
+   *
+   * Three beats, no wall of text: prompt HOLD, detect the attach, prompt
+   * RELEASE, detect the release, then start the waves. The aim preview added to
+   * GrappleSystem is already live during this, so "hold" and "where it would
+   * land" teach each other.
+   *
+   * Skippable with P at any time. Completing OR skipping persists the flag, so
+   * this costs a returning player nothing. Driven from
+   * {@link updateTetherTutorial} rather than timers so it follows the player's
+   * actual actions, not a clock.
+   */
+  private startTetherTutorial(): void {
+    this.tutorialStage = 'hold';
+    this.tutorialText = this.add
+      .text(CANVAS.WIDTH / 2, CANVAS.HEIGHT * 0.22, tr('tutorial.tetherHold'), textStyle(20, { fontStyle: 'bold' }))
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(9500);
+    this.tutorialSkipText = this.add
+      .text(CANVAS.WIDTH / 2, CANVAS.HEIGHT * 0.22 + 26, tr('tutorial.skip'), textStyle(12))
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(9500)
+      .setAlpha(0.55);
+  }
+
+  /** Advance the onboarding from the grapple's real state. */
+  private updateTetherTutorial(): void {
+    if (this.tutorialStage === 'off') return;
+    if (this.tutorialStage === 'hold' && this.grapple.isAttached) {
+      this.tutorialStage = 'release';
+      this.tutorialText?.setText(tr('tutorial.tetherRelease'));
+      return;
+    }
+    if (this.tutorialStage === 'release' && !this.grapple.isAttached) {
+      this.finishTetherTutorial(tr('tutorial.tetherDone'));
+    }
+  }
+
+  /** Persist completion, clear the overlay, and release the waves. */
+  private finishTetherTutorial(closingLine: string | null): void {
+    if (this.tutorialStage === 'off') return;
+    this.tutorialStage = 'off';
+    this.tutorialSkipText?.destroy();
+    this.tutorialSkipText = null;
+    if (closingLine && this.tutorialText) {
+      const reduced = prefersReducedMotion(this.settings);
+      this.tutorialText.setText(closingLine);
+      this.tweens.add({
+        targets: this.tutorialText,
+        alpha: 0,
+        delay: reduced ? 0 : 900,
+        duration: reduced ? 80 : 500,
+        onComplete: () => { this.tutorialText?.destroy(); this.tutorialText = null; },
+      });
+    } else {
+      this.tutorialText?.destroy();
+      this.tutorialText = null;
+    }
+    const settings = { ...this.settings, tetherTutorialDone: true };
+    saveSettings(settings);
+    this.waves.start(this.simulationMs);
   }
 
   private buildArena(): void {
@@ -228,6 +311,30 @@ export class GameScene extends Phaser.Scene {
     });
     window.addEventListener('blur', this.focusLossHandler);
     document.addEventListener('visibilitychange', this.visibilityHandler);
+
+    // TOUCH: a real thumb scheme rather than the previous outright bail-out.
+    // Left half is a floating movement stick, right half aims and holds the
+    // tether, and DASH / CUT are on-screen buttons. The callbacks feed the SAME
+    // action queue the keyboard and gamepad use, so the simulation is untouched.
+    if (touchAvailable(this)) {
+      this.touch = new TouchControls(this, {
+        toWorld: (x, y) => this.cameras.main.getWorldPoint(x, y),
+        onTetherStart: (aimX, aimY) => {
+          this.audio.unlock();
+          this.lastInputMode = 'touch';
+          this.queueAction({ kind: 'tetherFire', aimX, aimY });
+        },
+        onTetherRelease: () => this.queueAction({ kind: 'tetherRelease' }),
+        onDash: () => {
+          this.lastInputMode = 'touch';
+          this.queueAction({ kind: 'dash' });
+        },
+        onCut: (aimX, aimY) => {
+          this.lastInputMode = 'touch';
+          this.queueAction({ kind: 'slash', aimX, aimY });
+        },
+      });
+    }
   }
 
   private bindActionKeys(): void {
@@ -281,6 +388,9 @@ export class GameScene extends Phaser.Scene {
   private handleFocusLoss(): void {
     if (this.gameEnded) return;
     this.clearHeldInput();
+    // A touch that ends because the tab lost focus never fires POINTER_UP, so
+    // without this the stick and tether would stay held after returning.
+    this.touch?.reset();
     if (!this.scene.isPaused()) this.pauseGame();
   }
 
@@ -298,6 +408,13 @@ export class GameScene extends Phaser.Scene {
 
   private pauseGame(confirmAbandon = false): void {
     if (this.gameEnded || this.scene.isPaused()) return;
+    // While the onboarding is up, the pause key SKIPS it rather than pausing:
+    // the prompt is the only thing on screen, so pausing it would be a dead end,
+    // and this is the advertised escape hatch ("P to skip").
+    if (this.tutorialStage !== 'off') {
+      this.finishTetherTutorial(null);
+      return;
+    }
     this.simulationActions = [];
     this.audio.setPaused(true);
     this.scene.pause();
@@ -332,6 +449,9 @@ export class GameScene extends Phaser.Scene {
       this.simulate(input, PHYSICS.FIXED_STEP_MS);
       this.accumulatorMs -= PHYSICS.FIXED_STEP_MS;
     }
+    // Read the onboarding off the grapple's REAL attach state after stepping, so
+    // it advances on what actually happened rather than on a timer.
+    this.updateTetherTutorial();
     this.updateHud();
   }
 
@@ -341,19 +461,26 @@ export class GameScene extends Phaser.Scene {
     const deadzone = this.settings.gamepadDeadzone;
     const padX = pad && Math.abs(pad.axes[0] ?? 0) > deadzone ? pad.axes[0] : 0;
     const padY = pad && Math.abs(pad.axes[1] ?? 0) > deadzone ? pad.axes[1] : 0;
+    // Touch is a THIRD input source OR-ed in beside keyboard and gamepad, so a
+    // hybrid device (tablet with a keyboard) can use either without a mode flag.
+    const t = this.touch?.moveState;
+    const touchAim = this.touch?.aim ?? null;
     return {
-      left: this.keys.left.isDown || this.cursors.left.isDown || padX < 0,
-      right: this.keys.right.isDown || this.cursors.right.isDown || padX > 0,
-      up: this.keys.up.isDown || this.cursors.up.isDown || padY < 0,
-      down: this.keys.down.isDown || this.cursors.down.isDown || padY > 0,
+      left: this.keys.left.isDown || this.cursors.left.isDown || padX < 0 || t?.left === true,
+      right: this.keys.right.isDown || this.cursors.right.isDown || padX > 0 || t?.right === true,
+      up: this.keys.up.isDown || this.cursors.up.isDown || padY < 0 || t?.up === true,
+      down: this.keys.down.isDown || this.cursors.down.isDown || padY > 0 || t?.down === true,
       reelIn: this.keys.reelIn.isDown || Boolean(pad?.buttons[4]?.pressed),
       reelOut: this.keys.reelOut.isDown || Boolean(pad?.buttons[5]?.pressed),
       fireHeld: (
         (this.settings.bindings.tether === 'MOUSE_LEFT' && this.input.activePointer.leftButtonDown()) ||
         (this.settings.bindings.tether === 'MOUSE_RIGHT' && this.input.activePointer.rightButtonDown())
-      ) || this.keys.tether?.isDown === true || this.gamepadTetherHeld,
-      aimX: aim.x,
-      aimY: aim.y,
+      ) || this.keys.tether?.isDown === true || this.gamepadTetherHeld
+        || this.touch?.holdingTether === true,
+      // An active touch aim wins: the thumb IS the cursor on a phone, and the
+      // mouse pointer is stale there.
+      aimX: touchAim?.x ?? aim.x,
+      aimY: touchAim?.y ?? aim.y,
     };
   }
 
@@ -748,6 +875,8 @@ export class GameScene extends Phaser.Scene {
     document.removeEventListener('visibilitychange', this.visibilityHandler);
     this.input.removeAllListeners();
     this.input.keyboard?.removeAllListeners();
+    this.touch?.destroy();
+    this.touch = null;
     this.grapple?.destroy();
   }
 }

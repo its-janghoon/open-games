@@ -104,9 +104,6 @@ export function toHex(color: number): string {
   return `#${(color & 0xffffff).toString(16).padStart(6, '0')}`;
 }
 
-/** Warm skin tone shared by champion faces/hands (kept off the accent ramp). */
-const SKIN = 0xf0e6d2;
-
 /**
  * Wrap authored body markup in an `<svg>` with a shared `<defs>` gradient
  * ramp derived from the palette so figures read as softly shaded volumes
@@ -198,138 +195,184 @@ const CH_FOOT = 90 / CH_H; // ground contact near the very bottom
  * the palette. The per-role motif (weapon/prop) is layered on top so each of
  * the five roles reads as a different character.
  */
-function championBase(id: string, pal: SpritePalette): string {
+/**
+ * TACTICAL-GEOMETRIC CHASSIS + ORDNANCE (design direction C).
+ *
+ * Champions are NOT humanoid figures. Each ROLE is a bold geometric emblem
+ * whose silhouette alone encodes the role, and each roster CHAMPION bolts a
+ * distinct oversized WEAPON onto that chassis.
+ *
+ * This replaced an earlier ball-head / cone-torso humanoid base. That base read
+ * as unfinished placeholder art because it imitated realistic human proportions
+ * crudely, and because all ten champions shared one skeleton they were
+ * separable only by accent color. A deliberate geometric language reads as a
+ * STYLE rather than as a stand-in, and - the point that actually decides MOBA
+ * fights - a shape+weapon pair stays legible at unit scale in a teamfight where
+ * a color swap does not.
+ *
+ * `shape` is the role silhouette authored in the 54x78 CH_ART space (center
+ * x=27, ground contact y~75). `coreY` places the glowing core the unit reads
+ * its facing from. Everything stays procedural and palette-driven: ZERO binary
+ * assets, original IP.
+ */
+function chassis(
+  id: string,
+  pal: SpritePalette,
+  shape: string,
+  coreY: number,
+): string {
   const outline = toHex(pal.outline);
-  const skin = toHex(SKIN);
-  const skinShade = toHex(darken(SKIN, 0.22));
-  const fill = bodyFill(id);
+  const rim = toHex(pal.rim);
+  const clip = `clip-${id}`;
+  return (
+    // Clip the lit sheen to the silhouette so an arbitrary shape still reads as
+    // a volume without hand-authoring an inset copy of every path.
+    `<clipPath id="${clip}"><path d="${shape}"/></clipPath>` +
+    // solid chassis plate
+    `<path d="${shape}" fill="${bodyFill(id)}" stroke="${outline}" stroke-width="2"/>` +
+    // top-lit sheen washing the upper plane
+    `<rect x="0" y="0" width="54" height="46" fill="${rimFill(id)}" ` +
+    `clip-path="url(#${clip})" opacity="0.5"/>` +
+    // team-rim contour so ally/enemy reads before the shape does
+    `<path d="${shape}" fill="none" stroke="${rim}" stroke-width="1.2" opacity="0.75"/>` +
+    // glowing core: facing + a single bright focal point per unit
+    `<circle cx="27" cy="${coreY}" r="4.2" fill="${coreFill(id)}" ` +
+    `stroke="${outline}" stroke-width="1.2"/>` +
+    `<circle cx="27" cy="${coreY}" r="1.6" fill="${toHex(lighten(pal.rim, 0.55))}"/>`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared ORDNANCE primitives.
+//
+// Each weapon is authored pointing along +x at the local origin, then placed by
+// the caller with a `translate(...) rotate(...)` group. That keeps the maths in
+// one place instead of re-deriving rotated path coordinates per champion.
+// ---------------------------------------------------------------------------
+
+/** A rocket: tail fins, casing, nose cone, and an optional exhaust plume. */
+function rocketAt(
+  pal: SpritePalette,
+  x: number,
+  y: number,
+  deg: number,
+  len = 18,
+  flame = true,
+): string {
+  const outline = toHex(pal.outline);
+  const casing = toHex(lighten(pal.base, 0.5));
+  const hot = toHex(lighten(pal.rim, 0.6));
+  const h = 3.2;
+  const back = -len / 2;
+  const front = len / 2;
+  return (
+    `<g transform="translate(${x} ${y}) rotate(${deg})">` +
+    (flame
+      ? `<path d="M${back - 1} 0 L${back - 12} -3.6 L${back - 7} 0 L${back - 12} 3.6 Z" ` +
+        `fill="${hot}" opacity="0.92"/>`
+      : '') +
+    `<path d="M${back} ${-h} l-4.5 -4.5 l4.5 1.2 Z" fill="${casing}" stroke="${outline}" stroke-width="0.9"/>` +
+    `<path d="M${back} ${h} l-4.5 4.5 l4.5 -1.2 Z" fill="${casing}" stroke="${outline}" stroke-width="0.9"/>` +
+    `<rect x="${back}" y="${-h}" width="${len}" height="${h * 2}" rx="1.2" ` +
+    `fill="${casing}" stroke="${outline}" stroke-width="1.2"/>` +
+    `<path d="M${front} ${-h} L${front + 6.5} 0 L${front} ${h} Z" ` +
+    `fill="${hot}" stroke="${outline}" stroke-width="1.1"/>` +
+    `</g>`
+  );
+}
+
+/** A launcher TUBE the rocket flies out of: barrel, muzzle ring, rear bell. */
+function launcherAt(
+  pal: SpritePalette,
+  x: number,
+  y: number,
+  deg: number,
+  len = 26,
+): string {
+  const outline = toHex(pal.outline);
+  const steel = toHex(darken(lighten(pal.base, 0.32), 0.14));
+  const rim = toHex(pal.rim);
+  const h = 4.2;
+  const back = -len / 2;
+  const front = len / 2;
+  return (
+    `<g transform="translate(${x} ${y}) rotate(${deg})">` +
+    // rear blast bell
+    `<path d="M${back} ${-h} L${back - 5} ${-h - 2.6} L${back - 5} ${h + 2.6} L${back} ${h} Z" ` +
+    `fill="${steel}" stroke="${outline}" stroke-width="1.2"/>` +
+    // barrel
+    `<rect x="${back}" y="${-h}" width="${len}" height="${h * 2}" rx="1.6" ` +
+    `fill="${steel}" stroke="${outline}" stroke-width="1.4"/>` +
+    // muzzle ring
+    `<rect x="${front - 3}" y="${-h - 1.6}" width="4" height="${h * 2 + 3.2}" rx="1" ` +
+    `fill="${steel}" stroke="${outline}" stroke-width="1.2"/>` +
+    // sight rail + accent stripe
+    `<path d="M${back + 4} ${-h} L${front - 5} ${-h}" stroke="${rim}" stroke-width="1.4" opacity="0.9"/>` +
+    `<rect x="${back + 5}" y="${-h - 3}" width="5" height="3" fill="${steel}" stroke="${outline}" stroke-width="0.9"/>` +
+    `</g>`
+  );
+}
+
+/** Marksman: upward ARROWHEAD wedge - the longest reach, the sharpest read. */
+function marksman(id: string, pal: SpritePalette): string {
   const rim = toHex(pal.rim);
   return (
-    // ground-anchored legs
-    `<path d="M22 58 L21 74 L26 74 L27 60 Z" fill="${toHex(pal.shadow)}" stroke="${outline}" stroke-width="1"/>` +
-    `<path d="M32 58 L33 74 L28 74 L27 60 Z" fill="${toHex(darken(pal.base, 0.2))}" stroke="${outline}" stroke-width="1"/>` +
-    // boots
-    `<rect x="20" y="72" width="9" height="4" rx="1.5" fill="${outline}"/>` +
-    `<rect x="27" y="72" width="9" height="4" rx="1.5" fill="${outline}"/>` +
-    // torso: a rounded cuirass tapering to the waist
-    `<path d="M27 30 C18 32 15 42 18 56 L36 56 C39 42 36 32 27 30 Z" ` +
-    `fill="${fill}" stroke="${outline}" stroke-width="1.4"/>` +
-    // soft lit sheen washing the front plane of the cuirass
-    `<path d="M27 31 C20 33 18 42 20 54 L28 54 C29 42 29 33 27 31 Z" ` +
-    `fill="${rimFill(id)}" opacity="0.4"/>` +
-    // team-rim highlight down the lit shoulder edge
-    `<path d="M22 33 C18 40 18 48 19 55" fill="none" stroke="${rim}" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>` +
-    // chest emblem catching the team accent
-    `<circle cx="27" cy="41" r="2.6" fill="${rim}" opacity="0.85"/>` +
-    // shoulder pauldrons with rim-lit crowns
-    `<ellipse cx="18" cy="34" rx="6" ry="4.5" fill="${fill}" stroke="${outline}" stroke-width="1"/>` +
-    `<ellipse cx="36" cy="34" rx="6" ry="4.5" fill="${fill}" stroke="${outline}" stroke-width="1"/>` +
-    `<path d="M13 33 A6 4.5 0 0 1 23 33" fill="none" stroke="${rim}" stroke-width="1" opacity="0.7"/>` +
-    `<path d="M31 33 A6 4.5 0 0 1 41 33" fill="none" stroke="${rim}" stroke-width="1" opacity="0.7"/>` +
-    // neck + head
-    `<rect x="24" y="24" width="6" height="6" fill="${skinShade}"/>` +
-    `<circle cx="27" cy="18" r="8" fill="${skin}" stroke="${outline}" stroke-width="1.2"/>` +
-    // jaw shade
-    `<path d="M21 20 A8 8 0 0 0 33 20" fill="none" stroke="${skinShade}" stroke-width="1.4" opacity="0.6"/>`
+    chassis(id, pal, 'M27 12 L45 66 L27 54 L9 66 Z', 34) +
+    // targeting notch: a role tell, not a weapon (the champion motif brings that)
+    `<path d="M27 12 L27 24" stroke="${rim}" stroke-width="1.6" opacity="0.85"/>`
   );
 }
 
-/** Marksman: hooded scout drawing a longbow on the right. */
-function marksman(id: string, pal: SpritePalette): string {
-  const outline = toHex(pal.outline);
-  const wood = toHex(lighten(pal.base, 0.4));
-  const string = toHex(lighten(pal.rim, 0.2));
-  return (
-    championBase(id, pal) +
-    // longbow arc down the right side
-    `<path d="M42 10 C52 24 52 46 42 60" fill="none" stroke="${wood}" stroke-width="2.4" stroke-linecap="round"/>` +
-    // bowstring
-    `<path d="M42 10 L38 35 L42 60" fill="none" stroke="${string}" stroke-width="1" opacity="0.85"/>` +
-    // nocked arrow
-    `<path d="M20 35 L40 35" stroke="${outline}" stroke-width="1.4"/>` +
-    `<path d="M40 35 L36 33 M40 35 L36 37" stroke="${outline}" stroke-width="1.2"/>` +
-    // quiver hood peak
-    `<path d="M20 13 L27 6 L27 12 Z" fill="${bodyFill(id)}" stroke="${outline}" stroke-width="1"/>`
-  );
-}
-
-/** Assassin: hooded rogue with twin crossed daggers. */
+/** Assassin: tall DIAMOND - narrow, top-heavy, reads as a dagger point. */
 function assassin(id: string, pal: SpritePalette): string {
-  const outline = toHex(pal.outline);
-  const blade = toHex(lighten(pal.rim, 0.35));
-  const hood = bodyFill(id);
+  const rim = toHex(pal.rim);
   return (
-    championBase(id, pal) +
-    // deep hood cowl over the head
-    `<path d="M17 20 C17 6 37 6 37 20 L33 18 C33 10 21 10 21 18 Z" fill="${hood}" stroke="${outline}" stroke-width="1.2"/>` +
-    // crossed daggers
-    `<path d="M12 30 L24 46" stroke="${blade}" stroke-width="2.6" stroke-linecap="round"/>` +
-    `<path d="M42 30 L30 46" stroke="${blade}" stroke-width="2.6" stroke-linecap="round"/>` +
-    `<path d="M12 30 L15 33 M42 30 L39 33" stroke="${outline}" stroke-width="2"/>` +
-    // shadowy glint eyes
-    `<circle cx="24" cy="17" r="1.4" fill="${toHex(pal.rim)}"/>` +
-    `<circle cx="30" cy="17" r="1.4" fill="${toHex(pal.rim)}"/>`
+    chassis(id, pal, 'M27 8 L46 40 L27 74 L8 40 Z', 38) +
+    `<path d="M18 40 L36 40" stroke="${rim}" stroke-width="1.4" opacity="0.7"/>`
   );
 }
 
-/** Bruiser: heavy armor with a broad round shield on the left. */
+/** Bruiser: SHIELD plate - widest, flat-topped, visually the heaviest. */
 function bruiser(id: string, pal: SpritePalette): string {
-  const outline = toHex(pal.outline);
-  const metal = toHex(lighten(pal.base, 0.35));
-  const boss = toHex(lighten(pal.rim, 0.3));
+  const rim = toHex(pal.rim);
   return (
-    championBase(id, pal) +
-    // broad shield on the left arm
-    `<ellipse cx="12" cy="44" rx="10" ry="14" fill="${metal}" stroke="${outline}" stroke-width="1.6"/>` +
-    `<ellipse cx="12" cy="44" rx="6" ry="9" fill="none" stroke="${outline}" stroke-width="1" opacity="0.6"/>` +
-    `<circle cx="12" cy="44" r="3" fill="${boss}" stroke="${outline}" stroke-width="1"/>` +
-    // heavy chest plate ridge
-    `<path d="M27 32 L27 54" stroke="${outline}" stroke-width="1.2" opacity="0.5"/>` +
-    // helm crest
-    `<path d="M23 11 L27 5 L31 11 Z" fill="${metal}" stroke="${outline}" stroke-width="1"/>`
+    chassis(id, pal, 'M9 14 H45 V44 Q27 76 9 44 Z', 36) +
+    // armour ridges
+    `<path d="M16 22 L16 46 M38 22 L38 46" stroke="${rim}" stroke-width="1.3" opacity="0.6"/>`
   );
 }
 
-/** Mage fallback: robed caster with a tall staff and glowing orb. */
+/** Mage fallback: HEXAGON - an arcane cell, flat sides, no point. */
 function mage(id: string, pal: SpritePalette): string {
-  const outline = toHex(pal.outline);
-  const shaft = toHex(darken(lighten(pal.base, 0.3), 0.2));
+  const rim = toHex(pal.rim);
   return (
-    championBase(id, pal) +
-    `<path d="M18 44 C12 58 14 70 12 74 L42 74 C40 70 42 58 36 44 Z" ` +
-    `fill="${bodyFill(id)}" stroke="${outline}" stroke-width="1.2" opacity="0.96"/>` +
-    `<path d="M43 16 L41 66" stroke="${shaft}" stroke-width="2.4" stroke-linecap="round"/>` +
-    `<circle cx="42" cy="12" r="6" fill="${coreFill(id)}" stroke="${outline}" stroke-width="1"/>` +
-    `<circle cx="40" cy="10" r="1.8" fill="${toHex(lighten(pal.rim, 0.4))}"/>` +
-    `<path d="M17 12 L27 -2 L37 12 Z" fill="${bodyFill(id)}" stroke="${outline}" stroke-width="1.2"/>`
+    chassis(id, pal, 'M27 8 L46 22 L46 54 L27 68 L8 54 L8 22 Z', 36) +
+    `<path d="M27 8 L27 20 M8 22 L18 28 M46 22 L36 28" stroke="${rim}" ` +
+    `stroke-width="1.2" opacity="0.6"/>`
   );
 }
 
 /**
  * Embermage benchmark art. Nine gameplay poses resolve to four authored,
  * cacheable silhouettes so state reads clearly without creating an open-ended
- * texture family. Every layer remains palette/team driven and procedural.
+ * texture family. The hexagon chassis is constant; the FLAME CANNON it carries
+ * changes stance per variant, which is what makes the pose readable at unit
+ * scale. Every layer remains palette/team driven and procedural.
  */
 function embermage(id: string, pal: SpritePalette, variant: ChampionArtVariant): string {
   const outline = toHex(pal.outline);
-  const shaft = toHex(darken(lighten(pal.base, 0.42), 0.18));
-  const hot = toHex(lighten(pal.rim, 0.55));
-  const glow = coreFill(id);
-  const robe =
-    `<path data-layer="ember-robe" d="M18 43 C11 56 13 69 10 75 L44 75 C41 68 43 56 36 43 Z" ` +
-    `fill="${bodyFill(id)}" stroke="${outline}" stroke-width="1.3"/>` +
-    `<path d="M27 44 L20 72 M27 44 L35 72" fill="none" stroke="${toHex(pal.rim)}" ` +
-    `stroke-width="1.1" opacity="0.55"/>`;
+  const hot = toHex(lighten(pal.rim, 0.6));
+  const hex = 'M27 8 L46 22 L46 54 L27 68 L8 54 L8 22 Z';
+  const body = chassis(id, pal, hex, 36);
 
   if (variant === 'stride') {
     return (
       `<g data-champion="embermage" data-variant="stride">` +
-      championBase(id, pal) + robe +
-      `<path d="M41 18 L13 66" stroke="${shaft}" stroke-width="2.6" stroke-linecap="round"/>` +
-      `<circle cx="42" cy="16" r="6.5" fill="${glow}" stroke="${outline}" stroke-width="1"/>` +
-      `<path d="M17 39 C7 42 7 50 2 52 M20 47 C10 51 11 58 5 62" fill="none" ` +
-      `stroke="${hot}" stroke-width="1.4" stroke-linecap="round" opacity="0.8"/>` +
-      `<path d="M18 13 L27 2 L38 14 L31 12 L25 15 Z" fill="${bodyFill(id)}" stroke="${outline}"/>` +
+      body +
+      // cannon slung low while moving, muzzle trailing heat
+      launcherAt(pal, 30, 56, 24, 22) +
+      `<path d="M12 62 C4 66 6 72 0 74" fill="none" stroke="${hot}" ` +
+      `stroke-width="1.6" stroke-linecap="round" opacity="0.8"/>` +
       `</g>`
     );
   }
@@ -337,12 +380,12 @@ function embermage(id: string, pal: SpritePalette, variant: ChampionArtVariant):
   if (variant === 'strike') {
     return (
       `<g data-champion="embermage" data-variant="strike">` +
-      championBase(id, pal) + robe +
-      `<path d="M14 39 L51 24" stroke="${shaft}" stroke-width="3" stroke-linecap="round"/>` +
-      `<circle cx="51" cy="24" r="8" fill="${glow}" stroke="${outline}" stroke-width="1"/>` +
-      `<path d="M45 17 Q56 13 61 24 Q56 35 45 31" fill="none" stroke="${hot}" ` +
-      `stroke-width="1.8" opacity="0.9"/>` +
-      `<path d="M18 13 L27 1 L37 13 L31 12 L26 15 Z" fill="${bodyFill(id)}" stroke="${outline}"/>` +
+      body +
+      // cannon punched forward, muzzle blooming
+      launcherAt(pal, 34, 32, -8, 26) +
+      `<circle cx="50" cy="29" r="7" fill="${coreFill(id)}" stroke="${outline}" stroke-width="1.2"/>` +
+      `<path d="M44 21 Q56 17 60 29 Q56 41 44 37" fill="none" stroke="${hot}" ` +
+      `stroke-width="2" opacity="0.92"/>` +
       `</g>`
     );
   }
@@ -350,46 +393,37 @@ function embermage(id: string, pal: SpritePalette, variant: ChampionArtVariant):
   if (variant === 'channel') {
     return (
       `<g data-champion="embermage" data-variant="channel">` +
-      championBase(id, pal) + robe +
-      `<path d="M43 11 L39 66" stroke="${shaft}" stroke-width="2.7" stroke-linecap="round"/>` +
-      `<circle cx="43" cy="10" r="8" fill="${glow}" stroke="${outline}" stroke-width="1"/>` +
-      `<circle cx="27" cy="38" r="13" fill="none" stroke="${hot}" stroke-width="1.4" ` +
-      `stroke-dasharray="3 3" opacity="0.85"/>` +
-      `<circle cx="27" cy="38" r="8" fill="none" stroke="${toHex(pal.rim)}" stroke-width="1" opacity="0.7"/>` +
-      `<path d="M20 13 L27 0 L35 13 L30 11 L27 15 L24 11 Z" fill="${bodyFill(id)}" stroke="${outline}"/>` +
-      `<circle cx="18" cy="29" r="2" fill="${hot}"/><circle cx="36" cy="29" r="2" fill="${hot}"/>` +
+      body +
+      // cannon raised vertically, charge rings orbiting the chassis
+      launcherAt(pal, 41, 30, -74, 24) +
+      `<circle cx="27" cy="38" r="21" fill="none" stroke="${hot}" stroke-width="1.5" ` +
+      `stroke-dasharray="3 4" opacity="0.85"/>` +
+      `<circle cx="27" cy="38" r="14" fill="none" stroke="${toHex(pal.rim)}" ` +
+      `stroke-width="1.1" opacity="0.7"/>` +
+      `<circle cx="41" cy="17" r="4.4" fill="${hot}"/>` +
       `</g>`
     );
   }
 
   return (
     `<g data-champion="embermage" data-variant="idle">` +
-    championBase(id, pal) + robe +
-    `<path d="M44 15 L41 66" stroke="${shaft}" stroke-width="2.5" stroke-linecap="round"/>` +
-    `<circle cx="44" cy="12" r="7" fill="${glow}" stroke="${outline}" stroke-width="1"/>` +
-    `<circle cx="41.5" cy="9.5" r="1.8" fill="${hot}"/>` +
-    `<path d="M18 13 L27 0 L37 13 L31 11 L27 15 L24 11 Z" fill="${bodyFill(id)}" stroke="${outline}"/>` +
-    `<path d="M12 29 A4 4 0 0 0 16 25 M38 35 A4 4 0 0 0 42 31" fill="none" ` +
-    `stroke="${hot}" stroke-width="1.3" stroke-linecap="round"/>` +
+    body +
+    // cannon at rest across the chassis, pilot light lit
+    launcherAt(pal, 33, 44, 8, 24) +
+    `<circle cx="47" cy="42" r="3.4" fill="${hot}"/>` +
     `</g>`
   );
 }
 
-/** Enchanter: gowned support with a radiant halo. */
+/** Enchanter: a RING/BALL chassis - no point, no edge, reads as support. */
 function enchanter(id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
-  const halo = toHex(lighten(pal.rim, 0.3));
+  const halo = toHex(lighten(pal.rim, 0.35));
   return (
-    championBase(id, pal) +
-    // long flowing gown
-    `<path d="M19 42 C10 58 14 72 13 75 L41 75 C40 72 44 58 35 42 Z" ` +
-    `fill="${bodyFill(id)}" stroke="${outline}" stroke-width="1.2" opacity="0.95"/>` +
-    // radiant halo above the head
-    `<ellipse cx="27" cy="7" rx="11" ry="3.4" fill="none" stroke="${halo}" stroke-width="2"/>` +
-    `<ellipse cx="27" cy="7" rx="7" ry="2" fill="none" stroke="${toHex(lighten(pal.rim, 0.5))}" stroke-width="1" opacity="0.8"/>` +
-    // gentle wing/veil flourishes
-    `<path d="M18 36 C8 40 8 52 14 56" fill="none" stroke="${halo}" stroke-width="1.6" opacity="0.7"/>` +
-    `<path d="M36 36 C46 40 46 52 40 56" fill="none" stroke="${halo}" stroke-width="1.6" opacity="0.7"/>`
+    chassis(id, pal, 'M8 40 A19 19 0 1 1 46 40 A19 19 0 1 1 8 40 Z', 40) +
+    // concentric support rings
+    `<circle cx="27" cy="40" r="13" fill="none" stroke="${halo}" stroke-width="1.4" opacity="0.75"/>` +
+    `<circle cx="27" cy="40" r="19" fill="none" stroke="${outline}" stroke-width="1" opacity="0.5"/>`
   );
 }
 
@@ -425,154 +459,186 @@ const CHAMPION_BUILDERS: Record<ChampionRole, (id: string, pal: SpritePalette) =
 /** A signature overlay: pure markup keyed by roster id, drawn over the body. */
 type ChampionMotif = (id: string, pal: SpritePalette) => string;
 
-/** ashborne (marksman): a flaming pauldron ember crest over the drawn bow. */
+/** ashborne (marksman): a shoulder-fired ROCKET LAUNCHER with a loaded warhead. */
 function motifAshborne(_id: string, pal: SpritePalette): string {
-  const outline = toHex(pal.outline);
-  const ember = toHex(lighten(pal.rim, 0.45));
+  const hot = toHex(lighten(pal.rim, 0.55));
   return (
     `<g data-motif="ashborne">` +
-    // tri-flame crest rising off the right shoulder
-    `<path d="M34 30 L37 20 L39 27 L42 18 L43 29 Z" fill="${ember}" stroke="${outline}" stroke-width="0.8"/>` +
-    // a hot ember nocked at the arrow tip
-    `<circle cx="40" cy="35" r="2.2" fill="${ember}"/>` +
+    launcherAt(pal, 27, 34, -20, 26) +
+    // warhead sitting in the muzzle, unfired (no plume)
+    rocketAt(pal, 41, 29, -20, 8, false) +
+    // pilot flare at the blast bell
+    `<circle cx="14" cy="40" r="2.6" fill="${hot}" opacity="0.9"/>` +
     `</g>`
   );
 }
 
-/** duskarrow (marksman): a twin-fletch quiver + moonlit visor, not a crest. */
+/** duskarrow (marksman): a twin-barrel coil RAILGUN - reach without a rocket. */
 function motifDuskarrow(id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
-  const feather = toHex(lighten(pal.base, 0.5));
-  const moon = toHex(lighten(pal.rim, 0.4));
+  const steel = toHex(darken(lighten(pal.base, 0.4), 0.1));
+  const arc = toHex(lighten(pal.rim, 0.55));
   return (
     `<g data-motif="duskarrow">` +
-    // back quiver with two fletched arrows over the left shoulder
-    `<path d="M14 30 L10 46 L15 47 L19 31 Z" fill="${bodyFill(id)}" stroke="${outline}" stroke-width="1"/>` +
-    `<path d="M12 30 L9 24 M16 30 L14 23" stroke="${feather}" stroke-width="1.6" stroke-linecap="round"/>` +
-    // crescent visor across the brow
-    `<path d="M22 16 A6 6 0 0 0 32 16" fill="none" stroke="${moon}" stroke-width="1.6" stroke-linecap="round"/>` +
+    // paired barrels running out to the right
+    `<rect x="20" y="28" width="30" height="3.4" rx="1.2" fill="${steel}" stroke="${outline}" stroke-width="1.1"/>` +
+    `<rect x="20" y="36" width="30" height="3.4" rx="1.2" fill="${steel}" stroke="${outline}" stroke-width="1.1"/>` +
+    // charge coils wrapping both barrels
+    `<path d="M26 26 L26 42 M32 26 L32 42 M38 26 L38 42" stroke="${arc}" ` +
+    `stroke-width="1.5" opacity="0.9"/>` +
+    // breech block + a hot arc jumping the muzzles
+    `<rect x="15" y="25" width="7" height="18" rx="1.6" fill="${bodyFill(id)}" ` +
+    `stroke="${outline}" stroke-width="1.2"/>` +
+    `<path d="M50 30 Q53 34 50 38" fill="none" stroke="${arc}" stroke-width="1.6" opacity="0.95"/>` +
     `</g>`
   );
 }
 
-/** nightveil (assassin): a horned veil-mask + a dark shroud tail. */
+/** nightveil (assassin): a back-mounted NINJA ROCKET, lit and ready to burn. */
 function motifNightveil(_id: string, pal: SpritePalette): string {
-  const outline = toHex(pal.outline);
   const veil = toHex(darken(pal.base, 0.15));
   const glint = toHex(lighten(pal.rim, 0.45));
   return (
     `<g data-motif="nightveil">` +
-    // twin horn tips curling off the cowl
-    `<path d="M19 9 L15 2 L21 8 Z" fill="${veil}" stroke="${outline}" stroke-width="0.8"/>` +
-    `<path d="M35 9 L39 2 L33 8 Z" fill="${veil}" stroke="${outline}" stroke-width="0.8"/>` +
-    // a trailing shroud flowing off the waist
-    `<path d="M33 50 C42 54 40 66 34 72" fill="none" stroke="${veil}" stroke-width="2.2" stroke-linecap="round" opacity="0.85"/>` +
-    // a single bright veil sigil on the chest
-    `<path d="${starPath(27, 44, 3, 1.2, 4)}" fill="${glint}"/>` +
+    // the rocket strapped diagonally across the back, exhaust already burning
+    rocketAt(pal, 27, 32, -62, 20, true) +
+    // ninja headband knot + trailing tails whipping off the strap
+    `<path d="M14 22 L26 26" stroke="${veil}" stroke-width="2.4" stroke-linecap="round"/>` +
+    `<path d="M14 22 C8 26 10 33 5 35 M14 23 C9 29 12 35 7 39" fill="none" ` +
+    `stroke="${veil}" stroke-width="1.7" stroke-linecap="round" opacity="0.9"/>` +
+    // a single veil sigil catching the exhaust light
+    `<path d="${starPath(33, 47, 3, 1.2, 4)}" fill="${glint}"/>` +
     `</g>`
   );
 }
 
-/** grimtrail (assassin): a saw-tooth trophy collar + low-slung war paint. */
+/** grimtrail (assassin): twin crossed SICKLES - close-range, no ordnance. */
 function motifGrimtrail(_id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
-  const bone = toHex(lighten(pal.base, 0.55));
-  const warpaint = toHex(pal.rim);
+  const steel = toHex(lighten(pal.rim, 0.45));
+  const grip = toHex(darken(pal.base, 0.32));
   return (
     `<g data-motif="grimtrail">` +
-    // jagged bone/claw collar around the neck
-    `<path d="M20 27 L22 31 L24 27 L26 31 L28 27 L30 31 L32 27 L34 31 L34 33 L20 33 Z" ` +
-    `fill="${bone}" stroke="${outline}" stroke-width="0.8"/>` +
-    // twin war-paint slashes down the cheeks
-    `<path d="M23 18 L22 23 M31 18 L32 23" stroke="${warpaint}" stroke-width="1.4" stroke-linecap="round" opacity="0.9"/>` +
-    // a trophy fang hanging at the hip
-    `<path d="M18 52 L16 58 L20 54 Z" fill="${bone}" stroke="${outline}" stroke-width="0.7"/>` +
+    // left sickle: hooked blade sweeping down-left
+    `<path d="M22 30 C10 30 4 40 8 50" fill="none" stroke="${steel}" ` +
+    `stroke-width="3" stroke-linecap="round"/>` +
+    `<path d="M22 30 L28 26" stroke="${grip}" stroke-width="3" stroke-linecap="round"/>` +
+    // right sickle: mirrored, sweeping down-right
+    `<path d="M32 30 C44 30 50 40 46 50" fill="none" stroke="${steel}" ` +
+    `stroke-width="3" stroke-linecap="round"/>` +
+    `<path d="M32 30 L26 26" stroke="${grip}" stroke-width="3" stroke-linecap="round"/>` +
+    // inner edge glints
+    `<path d="M20 32 C12 33 8 40 10 47 M34 32 C42 33 46 40 44 47" fill="none" ` +
+    `stroke="${toHex(lighten(pal.rim, 0.75))}" stroke-width="0.9" opacity="0.8"/>` +
+    `<circle cx="27" cy="26" r="2" fill="${grip}" stroke="${outline}" stroke-width="0.8"/>` +
     `</g>`
   );
 }
 
-/** ironhold (bruiser): a horned great-helm + a spiked shield boss. */
+/** ironhold (bruiser): a slab RIOT SHIELD plus a two-handed WARHAMMER. */
 function motifIronhold(_id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
-  const iron = toHex(lighten(pal.base, 0.4));
-  const spark = toHex(lighten(pal.rim, 0.35));
+  const iron = toHex(lighten(pal.base, 0.42));
+  const spark = toHex(lighten(pal.rim, 0.4));
+  const shaft = toHex(darken(pal.base, 0.3));
   return (
     `<g data-motif="ironhold">` +
-    // heavy bull horns sweeping off the helm
-    `<path d="M20 12 C13 9 12 15 16 17 C15 13 18 13 21 14 Z" fill="${iron}" stroke="${outline}" stroke-width="0.9"/>` +
-    `<path d="M34 12 C41 9 42 15 38 17 C39 13 36 13 33 14 Z" fill="${iron}" stroke="${outline}" stroke-width="0.9"/>` +
-    // a radiating spike ring around the shield boss
-    `<path d="M12 36 L12 33 M12 52 L12 55 M4 44 L1 44 M20 44 L23 44" stroke="${spark}" stroke-width="1.6" stroke-linecap="round"/>` +
+    // slab shield bolted across the left flank
+    `<path d="M4 26 L16 22 L16 56 L4 52 Z" fill="${iron}" stroke="${outline}" stroke-width="1.5"/>` +
+    `<path d="M10 26 L10 53" stroke="${outline}" stroke-width="1" opacity="0.6"/>` +
+    `<circle cx="10" cy="39" r="2.6" fill="${spark}" stroke="${outline}" stroke-width="0.9"/>` +
+    // warhammer: shaft up the right side, heavy head on top
+    `<path d="M42 60 L46 22" stroke="${shaft}" stroke-width="3" stroke-linecap="round"/>` +
+    `<rect x="38" y="12" width="16" height="10" rx="1.8" fill="${iron}" ` +
+    `stroke="${outline}" stroke-width="1.4"/>` +
+    `<path d="M38 17 L54 17" stroke="${spark}" stroke-width="1.3" opacity="0.85"/>` +
     `</g>`
   );
 }
 
-/** thornwarden (bruiser): a leafy laurel crown + bramble climbing the shield. */
+/** thornwarden (bruiser): a spiked FLAIL on a swinging chain. */
 function motifThornwarden(_id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
-  const leaf = toHex(lighten(pal.base, 0.45));
+  const iron = toHex(lighten(pal.base, 0.4));
   const vine = toHex(pal.rim);
   return (
     `<g data-motif="thornwarden">` +
-    // laurel leaves arcing over the brow
-    `<path d="M20 11 Q17 6 21 4 Q22 8 24 9 Z" fill="${leaf}" stroke="${outline}" stroke-width="0.7"/>` +
-    `<path d="M34 11 Q37 6 33 4 Q32 8 30 9 Z" fill="${leaf}" stroke="${outline}" stroke-width="0.7"/>` +
-    // a bramble vine winding up the shield with thorn ticks
-    `<path d="M8 56 C16 50 8 40 14 32" fill="none" stroke="${vine}" stroke-width="1.6" opacity="0.9"/>` +
-    `<path d="M11 50 L8 48 M12 42 L15 41 M11 36 L8 35" stroke="${vine}" stroke-width="1.2" stroke-linecap="round"/>` +
+    // chain arcing out from the right flank
+    `<path d="M34 34 C44 30 48 20 46 14" fill="none" stroke="${outline}" ` +
+    `stroke-width="1.6" stroke-dasharray="2.6 2" opacity="0.95"/>` +
+    // spiked ball at the end
+    `<circle cx="45" cy="11" r="7" fill="${iron}" stroke="${outline}" stroke-width="1.4"/>` +
+    `<path d="M45 4 L45 0 M52 11 L54 11 M38 11 L36 11 M50 6 L53 3 M40 6 L37 3 M50 16 L53 19" ` +
+    `stroke="${iron}" stroke-width="1.8" stroke-linecap="round"/>` +
+    `<circle cx="43" cy="9" r="2" fill="${vine}" opacity="0.9"/>` +
+    // bramble creeping up the chassis
+    `<path d="M12 58 C20 52 12 42 18 34" fill="none" stroke="${vine}" stroke-width="1.5" opacity="0.85"/>` +
     `</g>`
   );
 }
 
-/** frostquill (mage): a rimed crystalline staff head + drifting ice motes. */
+/** frostquill (mage): a long FROST LANCE tipped with a crystal. */
 function motifFrostquill(_id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
   const ice = toHex(lighten(pal.rim, 0.5));
+  const shaft = toHex(darken(lighten(pal.base, 0.35), 0.12));
   return (
     `<g data-motif="frostquill">` +
-    // a six-point frost crystal crowning the staff orb
-    `<path d="${starPath(42, 12, 6, 2.4, 6)}" fill="${ice}" stroke="${outline}" stroke-width="0.7"/>` +
-    // drifting ice motes trailing off the free hand
-    `<path d="${starPath(15, 40, 2.4, 1, 4)}" fill="${ice}"/>` +
-    `<path d="${starPath(11, 48, 1.8, 0.7, 4)}" fill="${ice}" opacity="0.8"/>` +
-    // a frosted hood brim
-    `<path d="M19 12 A9 6 0 0 1 36 12" fill="none" stroke="${ice}" stroke-width="1.3" opacity="0.8"/>` +
+    // lance shaft running low-left to high-right across the hexagon
+    `<path d="M6 62 L44 16" stroke="${shaft}" stroke-width="2.8" stroke-linecap="round"/>` +
+    // crystalline spearhead
+    `<path d="M44 16 L52 8 L50 18 Z" fill="${ice}" stroke="${outline}" stroke-width="1.1"/>` +
+    `<path d="${starPath(47, 13, 6, 2.4, 6)}" fill="${ice}" stroke="${outline}" stroke-width="0.6"/>` +
+    // rime motes shedding off the shaft
+    `<path d="${starPath(18, 48, 2.4, 1, 4)}" fill="${ice}"/>` +
+    `<path d="${starPath(12, 56, 1.8, 0.7, 4)}" fill="${ice}" opacity="0.8"/>` +
     `</g>`
   );
 }
 
-/** dawnsong (enchanter): a rayed sunburst halo + an uplifted blessing sigil. */
+/** dawnsong (enchanter): a twin-prong BEAM EMITTER casting a support ray. */
 function motifDawnsong(id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
-  const ray = toHex(lighten(pal.rim, 0.5));
+  const ray = toHex(lighten(pal.rim, 0.55));
   return (
     `<g data-motif="dawnsong">` +
-    // Sun rays radiating from the halo. Nudged down so every authored tip stays
-    // at y >= 0: the whole 54x78 figure is uniformly scaled under a fixed outer
-    // viewBox, so any point above y = 0 would scale to a negative coordinate and
-    // get clipped by the viewport. The topmost ray tip now lands exactly on the
-    // box's top edge (y = 0), preserving the upward sunburst silhouette.
-    `<path d="M27 4 L27 0 M18 6 L15 2 M36 6 L39 2 M12 10 L8 8 M42 10 L46 8" ` +
-    `stroke="${ray}" stroke-width="1.3" stroke-linecap="round"/>` +
-    // a warm blessing orb lifted in the hand
-    `<circle cx="40" cy="40" r="3.4" fill="${coreFill(id)}" stroke="${outline}" stroke-width="0.7"/>` +
-    `<circle cx="40" cy="40" r="6" fill="none" stroke="${ray}" stroke-width="0.9" opacity="0.7"/>` +
+    // emitter fork mounted on the right of the ring
+    `<path d="M34 40 L46 40" stroke="${outline}" stroke-width="2.4" stroke-linecap="round"/>` +
+    `<path d="M46 32 L46 48" stroke="${ray}" stroke-width="2.6" stroke-linecap="round"/>` +
+    `<path d="M46 32 L53 28 M46 48 L53 52" stroke="${ray}" stroke-width="2.2" stroke-linecap="round"/>` +
+    // focused beam between the prongs
+    `<path d="M47 34 Q52 40 47 46" fill="none" stroke="${toHex(lighten(pal.rim, 0.8))}" ` +
+    `stroke-width="1.5" opacity="0.95"/>` +
+    `<circle cx="48" cy="40" r="3" fill="${coreFill(id)}" stroke="${outline}" stroke-width="0.8"/>` +
+    // upward sunburst rays; tips stop at y=0 because the whole 54x78 figure is
+    // uniformly scaled under a fixed viewBox and any y<0 would be clipped.
+    `<path d="M27 8 L27 0 M17 12 L13 4 M37 12 L41 4" stroke="${ray}" ` +
+    `stroke-width="1.4" stroke-linecap="round"/>` +
     `</g>`
   );
 }
 
-/** wardlight (enchanter): a lantern staff + a protective hex-ward emblem. */
+/**
+ * wardlight (enchanter): the ROCKET-LAUNCHER BALL - the ring chassis with twin
+ * missile pods bolted to its flanks and warheads racked and lit.
+ */
 function motifWardlight(id: string, pal: SpritePalette): string {
   const outline = toHex(pal.outline);
   const lamp = toHex(lighten(pal.rim, 0.45));
+  const pod = toHex(darken(lighten(pal.base, 0.36), 0.12));
   return (
     `<g data-motif="wardlight">` +
-    // a hanging ward lantern on the right
-    `<path d="M40 20 L40 30" stroke="${outline}" stroke-width="1"/>` +
-    `<rect x="36" y="30" width="8" height="10" rx="1.6" fill="${coreFill(id)}" stroke="${outline}" stroke-width="1"/>` +
-    `<circle cx="40" cy="35" r="2" fill="${lamp}"/>` +
-    // a protective hex ward hovering over the head instead of an open halo
-    `<path d="${starPath(27, 6, 5, 3, 6)}" fill="none" stroke="${lamp}" stroke-width="1.3" opacity="0.9"/>` +
+    // left + right pods clamped onto the ball
+    `<rect x="0" y="30" width="12" height="16" rx="2" fill="${pod}" stroke="${outline}" stroke-width="1.3"/>` +
+    `<rect x="42" y="30" width="12" height="16" rx="2" fill="${pod}" stroke="${outline}" stroke-width="1.3"/>` +
+    // launch tubes: two per pod
+    `<circle cx="6" cy="35" r="2.6" fill="${outline}"/><circle cx="6" cy="41" r="2.6" fill="${outline}"/>` +
+    `<circle cx="48" cy="35" r="2.6" fill="${outline}"/><circle cx="48" cy="41" r="2.6" fill="${outline}"/>` +
+    // a warhead already climbing out of the top-right tube
+    rocketAt(pal, 48, 20, -90, 12, true) +
+    // ward light in the core so it still reads as a support unit
+    `<circle cx="27" cy="40" r="5.5" fill="${coreFill(id)}" stroke="${outline}" stroke-width="1"/>` +
+    `<path d="${starPath(27, 40, 4.5, 2, 6)}" fill="none" stroke="${lamp}" stroke-width="1.2" opacity="0.95"/>` +
     `</g>`
   );
 }

@@ -14,7 +14,18 @@ Surveyors, Skitters, Rammers, Fluxborn, Bastions, and Bombards each have a disti
 - P: pause; Esc: abandon confirmation
 - XInput: left/right sticks, RT tether, X cutter, A dash, LB/RB reel, Menu pause
 
-Touch gameplay is not supported; touch remains available for menus and layout inspection.
+### Touch
+
+Touch is a full gameplay input, not just menu navigation:
+
+- **Left half** — floating movement stick. The base anchors wherever your thumb
+  lands, so there is no fixed pad to find.
+- **Right half** — aim and tether. Touching aims, holding is the tether, and
+  releasing flings (the same semantics as holding mouse-left).
+- **DASH / CUT** — on-screen buttons, bottom right.
+
+Reeling (Q/E on desktop) is not surfaced on touch: it is a refinement, and a
+fifth control would crowd the thumb.
 
 ## Development
 

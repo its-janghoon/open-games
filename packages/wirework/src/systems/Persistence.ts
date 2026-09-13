@@ -26,6 +26,13 @@ export interface GameSettings {
   colorMode: ColorMode;
   bindings: Bindings;
   gamepadDeadzone: number;
+  /**
+   * Whether the player has completed (or skipped) the tether onboarding. The
+   * tether is hold-to-use and was undiscoverable, so a first run gates wave 1
+   * behind one successful hold-attach-release. Persisted so it never interrupts
+   * a returning player.
+   */
+  tetherTutorialDone: boolean;
 }
 
 export const SETTINGS_KEY = 'wirework:settings:v2';
@@ -55,6 +62,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   colorMode: 'default',
   bindings: { ...DEFAULT_BINDINGS },
   gamepadDeadzone: 0.18,
+  tetherTutorialDone: false,
 };
 
 let storageAvailable = true;
@@ -119,6 +127,7 @@ function normalizeSettings(value: unknown): GameSettings {
     ),
     bindings: validateBindings(root.bindings),
     gamepadDeadzone: numberIn(root.gamepadDeadzone, 0.1, 0.35, DEFAULT_SETTINGS.gamepadDeadzone),
+    tetherTutorialDone: root.tetherTutorialDone === true,
   };
 }
 

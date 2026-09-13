@@ -49,8 +49,12 @@
         align-items: center;
         justify-content: center;
       }
+      /* image-rendering stays `auto` (smooth): forcing `pixelated` here
+         nearest-neighbour-resamples the WHOLE canvas, text layer included, so
+         small Korean glyphs break up. Pixel-art crispness is applied
+         per-texture in PreloadScene.applyPixelArtFiltering() instead. */
       #game canvas {
-        image-rendering: pixelated;
+        image-rendering: auto;
       }
       #a11y-controls {
         position: fixed;

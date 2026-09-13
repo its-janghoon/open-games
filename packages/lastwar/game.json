@@ -10,5 +10,7 @@
     "phaser3"
   ],
   "status": "playable",
-  "thumbnail": "thumb.png"
+  "thumbnail": "thumb.png",
+  "focus": "parked",
+  "focusNote": "Live-service-shaped retention loop; no viable solo revenue path. Kept for portfolio."
 }

@@ -11,5 +11,7 @@
     "phaser3"
   ],
   "status": "playable",
-  "thumbnail": "thumb.png"
+  "thumbnail": "thumb.png",
+  "focus": "parked",
+  "focusNote": "MOBA: needs live opponents and 10-champion balance. Highest build cost, lowest solo monetization. Kept for portfolio."
 }

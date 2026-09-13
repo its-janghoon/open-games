@@ -53,6 +53,23 @@ export class GrappleSystem {
   private attachedSurface: GrappleSurface | null = null;
   private nodeHooked = false;
   private readonly wire: Phaser.GameObjects.Graphics;
+  /**
+   * AIM PREVIEW.
+   *
+   * Drawn just under the wire whenever the tether is idle: a ring at the point
+   * the hook WOULD anchor to for the current aim, plus a dashed line to it.
+   *
+   * This exists because the tether was effectively undiscoverable. It is
+   * hold-to-use (see {@link update}), so a player who clicks sees the hook
+   * cancel on the same frame and concludes the mechanic is broken - with no
+   * feedback about where it was even aiming. The preview makes the mechanic
+   * legible BEFORE committing: you can see what you would grab, and that
+   * something is grabbable at all.
+   *
+   * It reuses {@link resolveCandidate}, so the preview and the real shot cannot
+   * disagree - they run the identical raycast against the identical lists.
+   */
+  private readonly aimGfx: Phaser.GameObjects.Graphics;
   private readonly audio: AudioManager;
   private whooshAt = 0;
 
@@ -63,6 +80,7 @@ export class GrappleSystem {
   ) {
     this.audio = AudioManager.get(scene);
     this.wire = scene.add.graphics().setDepth(5);
+    this.aimGfx = scene.add.graphics().setDepth(4);
   }
 
   setSurfaces(surfaces: GrappleSurface[]): void { this.surfaces = surfaces; }
@@ -131,15 +149,70 @@ export class GrappleSystem {
 
   update(input: GrappleInput, dtMs: number, nowMs: number): void {
     const dt = dtMs / 1000;
-    if (!this.trackLiveAnchor()) { this.render(); return; }
+    if (!this.trackLiveAnchor()) { this.render(); this.renderAimPreview(input); return; }
     if (!input.fireHeld && this.phase !== WirePhase.Idle) {
       this.release();
       this.render();
+      this.renderAimPreview(input);
       return;
     }
     if (this.phase === WirePhase.Firing) this.advanceHook(dt);
     if (this.phase === WirePhase.Attached) this.applySwingPhysics(input, dt, dtMs, nowMs);
     this.render();
+    this.renderAimPreview(input);
+  }
+
+  /**
+   * Draw where the hook would land for the current aim. Idle only: once the wire
+   * is out, the wire itself is the feedback and a second line would just be
+   * noise. A node hook (much stronger pull, the intended way to kill a machine)
+   * gets a bigger double ring so the two outcomes are distinguishable at a
+   * glance, and an unaffordable shot is dimmed rather than hidden - "not enough
+   * charge" is different information from "nothing to grab".
+   */
+  private renderAimPreview(input: GrappleInput): void {
+    const g = this.aimGfx;
+    g.clear();
+    if (this.phase !== WirePhase.Idle) return;
+
+    const candidate = this.resolveCandidate(this.player.x, this.player.y, input.aimX, input.aimY);
+    if (!candidate) return;
+
+    const affordable = this.gas.canAfford(GAS.COST_GRAPPLE_FIRE);
+    const alpha = affordable ? 0.85 : 0.3;
+    const colour = candidate.nodeHooked ? GRAPPLE.PREVIEW_NODE_COLOR : GRAPPLE.PREVIEW_COLOR;
+    const { x, y } = candidate.anchor;
+
+    // Dashed lead line: cheap to draw and reads as "potential" rather than the
+    // solid wire, which means "attached".
+    const dx = x - this.player.x;
+    const dy = y - this.player.y;
+    const length = Math.hypot(dx, dy);
+    if (length > 1) {
+      const ux = dx / length;
+      const uy = dy / length;
+      g.lineStyle(1, colour, alpha * 0.5);
+      const dash = 8;
+      for (let t = 0; t < length; t += dash * 2) {
+        const end = Math.min(t + dash, length);
+        g.lineBetween(
+          this.player.x + ux * t, this.player.y + uy * t,
+          this.player.x + ux * end, this.player.y + uy * end,
+        );
+      }
+    }
+
+    g.lineStyle(1, colour, alpha);
+    g.strokeCircle(x, y, GRAPPLE.PREVIEW_RADIUS);
+    if (candidate.nodeHooked) {
+      g.strokeCircle(x, y, GRAPPLE.PREVIEW_RADIUS + 4);
+    }
+    // Crosshair ticks so the ring is findable against busy wall texture.
+    const r = GRAPPLE.PREVIEW_RADIUS;
+    g.lineBetween(x - r - 3, y, x - r + 1, y);
+    g.lineBetween(x + r - 1, y, x + r + 3, y);
+    g.lineBetween(x, y - r - 3, x, y - r + 1);
+    g.lineBetween(x, y + r - 1, x, y + r + 3);
   }
 
   private trackLiveAnchor(): boolean {
@@ -279,5 +352,5 @@ export class GrappleSystem {
     this.playSound(AudioKeys.SwingWhoosh, 0.5);
   }
   private playSound(key: AudioKey, volume = 0.6): void { this.audio.playSfx(key, volume); }
-  destroy(): void { this.wire.destroy(); }
+  destroy(): void { this.wire.destroy(); this.aimGfx.destroy(); }
 }

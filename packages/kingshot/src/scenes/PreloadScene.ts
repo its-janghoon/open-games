@@ -37,7 +37,26 @@ export class PreloadScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.applyPixelArtFiltering();
     this.scene.start(SceneKeys.Title);
+  }
+
+  /**
+   * Keep the pixel-art sprites/UI crisp WITHOUT pixelating the whole canvas.
+   *
+   * main.ts deliberately does not set `pixelArt: true`, because that forced
+   * NEAREST on every texture and Phaser Text is not exempt, so oversized glyph
+   * textures were nearest-minified and small Korean text broke up. The renderer
+   * now scales smoothly and crisp pixel art is restored here, per-texture. Text
+   * textures are created later and keep the smooth default, which is what they
+   * want. Mirrors lastwar's PreloadScene.
+   */
+  private applyPixelArtFiltering(): void {
+    for (const { key } of [...SHEETS, ...IMAGES]) {
+      if (this.textures.exists(key)) {
+        this.textures.get(key).setFilter(Phaser.Textures.FilterMode.NEAREST);
+      }
+    }
   }
 
   /** A simple pixel-styled loading bar wired to the loader progress events. */

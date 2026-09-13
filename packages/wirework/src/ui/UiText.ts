@@ -4,24 +4,27 @@ import { PALETTE } from '../config/GameConfig';
 /**
  * UiText - crisp-text strategy for the UI/HUD/menu layer.
  *
- * The game renders at a low logical resolution and is upscaled with
- * nearest-neighbour (Scale.FIT + pixelArt), which crushes small text. To keep
- * glyphs sharp we render Phaser Text at a higher DPI via the `resolution`
- * style property: the glyph texture is rasterized at `resolution` times the
- * logical size, so it stays crisp when the canvas is scaled up and on
- * high-DPI displays. This does NOT change roundPixels or the world pixel-art
- * scale; it only sharpens text.
+ * The canvas backbuffer is sized to DEVICE pixels (see resolveViewportPlan in
+ * main.ts) and each camera is zoomed by the same factor, so the 960x540 logical
+ * layout is drawn at display resolution rather than upscaled from a low-res
+ * buffer. On top of that the renderer scales SMOOTHLY - main.ts deliberately
+ * does not set `pixelArt: true` - so rasterizing glyphs above their drawn size
+ * acts as supersampling and reads as sharp text. Pixel art is kept crisp
+ * per-texture instead (PreloadScene.applyPixelArtFiltering).
  */
 
 /**
- * Text resolution multiplier. Text is rendered to its OWN glyph texture at
- * `resolution` times the logical size, so it is rasterized independently of the
- * world's nearest-neighbour pixel-art upscale (Phaser Text does not ride the
- * `pixelArt` nearest filter - it uses its own canvas texture, which we upload at
- * high DPI here). We scale with the device pixel ratio and use a min of 3x (was
- * 2x): on a 1x display the canvas is Scale.FIT-upscaled well past 1x for common
- * monitors, so a floor of 3x keeps HUD/menu glyphs crisp there too, and on
- * retina we go higher still. The world art stays pixel-art; only text sharpens.
+ * Text resolution multiplier: Text is rasterized to its own glyph texture at
+ * `resolution` times the logical size.
+ *
+ * DO NOT pair this with `pixelArt: true`. Phaser Text is NOT exempt from the
+ * global filter - TextureSource derives its default scaleMode straight from
+ * `game.config.antialias`, which `pixelArt` forces to false - so under pixelArt
+ * an oversized glyph texture is NEAREST-*minified* down to its drawn size,
+ * point-sampling away whole texel rows. Latin survives losing a row; Hangul
+ * does not, because jongseong stack 2-3 horizontal strokes into a few pixels
+ * and merge into blobs. With the smooth default in main.ts the same oversized
+ * texture is instead a supersampled downscale, which is why the floor is >=3x.
  */
 export const TEXT_RESOLUTION = Math.min(
   4,

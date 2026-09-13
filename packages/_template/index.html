@@ -23,8 +23,11 @@
         align-items: center;
         justify-content: center;
       }
+      /* Keep this `auto` (smooth). `pixelated` nearest-resamples the WHOLE
+         canvas, text layer included, which breaks up small glyphs. Apply
+         pixel-art crispness per-texture after load instead. */
       #game canvas {
-        image-rendering: pixelated;
+        image-rendering: auto;
       }
     </style>
   </head>

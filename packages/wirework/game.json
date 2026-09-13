@@ -5,7 +5,12 @@
   "genre": "Top-down Ring Defense Action",
   "summary": "Tether through a capacitor city and cut rear cooling nodes to stop autonomous siege machines.",
   "summaryKo": "축전 도시를 테더로 가로지르며 후방 냉각 노드를 절단해 자율 공성기계를 막으세요.",
-  "stack": ["typescript", "phaser3"],
+  "stack": [
+    "typescript",
+    "phaser3"
+  ],
   "status": "playable",
-  "thumbnail": "thumb.png"
+  "thumbnail": "thumb.png",
+  "focus": "active",
+  "focusNote": "Bounded 8-wave arcade run with desktop+touch parity - the one title targeted at web-game portals."
 }

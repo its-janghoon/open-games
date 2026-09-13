@@ -78,8 +78,17 @@ const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: PALETTE.BG_SKY_CSS,
-  pixelArt: true,
-  roundPixels: true,
+  // Do NOT set `pixelArt: true`. It forces `antialias: false`, i.e. NEAREST on
+  // EVERY texture, and Phaser Text is not exempt: TextureSource takes its
+  // default scaleMode straight from `game.config.antialias`. Glyphs rasterized
+  // at TEXT_RESOLUTION (>=2x) then get NEAREST-*minified* to their drawn size,
+  // point-sampling texel rows away - Hangul jongseong merge into blobs. Smooth
+  // scaling turns the same oversized texture into a supersampled downscale, and
+  // pixel art is restored per-texture in PreloadScene.applyPixelArtFiltering().
+  //
+  // roundPixels stays false: the camera zoom is fractional, and snapping draw
+  // positions to integers pushes centred labels off-centre.
+  render: { antialias: true, roundPixels: false },
   scale: {
     // FIT of an ASPECT-MATCHED surface (fillWidth x fillHeight) fills a portrait
     // phone with no thin-band letterbox; the 960x540 layout is centered inside
@@ -168,6 +177,13 @@ function seedLanguage(): void {
 seedLanguage();
 const game = new Phaser.Game(config);
 registerRenderScale(game);
+// QA/debug hook: expose the running game only when explicitly requested via
+// ?debug in the URL, so screenshot/e2e tooling can introspect scene state.
+// Has no effect on the normal production page (no query flag). Mirrors the
+// hook wirework and whiteout carry.
+if (typeof location !== 'undefined' && location.search.includes('debug')) {
+  (globalThis as unknown as { __GAME__?: Phaser.Game }).__GAME__ = game;
+}
 
 // One simulation/autosave owner remains active across Title, Town, Settings,
 // Battle, and GameOver. Scene transitions therefore cannot pause production or

@@ -10,5 +10,7 @@
     "phaser3"
   ],
   "status": "playable",
-  "thumbnail": "thumb.png"
+  "thumbnail": "thumb.png",
+  "focus": "parked",
+  "focusNote": "Most complete of the parked set (37 sprites, tutorial objectives). Kept for portfolio and for tools/capture_screenshots.mjs."
 }

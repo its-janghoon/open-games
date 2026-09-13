@@ -17,7 +17,11 @@
         align-items: center;
         justify-content: center;
       }
-      #game canvas { image-rendering: pixelated; user-select: none; touch-action: manipulation; outline: 3px solid transparent; outline-offset: -3px; }
+      /* image-rendering stays `auto` (smooth): forcing `pixelated` here
+         nearest-neighbour-resamples the WHOLE canvas, text layer included, so
+         small Korean glyphs break up. Pixel-art crispness is applied
+         per-texture in PreloadScene.applyPixelArtFiltering() instead. */
+      #game canvas { image-rendering: auto; user-select: none; touch-action: manipulation; outline: 3px solid transparent; outline-offset: -3px; }
       #game canvas:focus-visible { outline-color: #f2f5f7; }
       html[data-color-mode="deuteranopia"] #game canvas { filter: saturate(.82) hue-rotate(10deg); }
       html[data-color-mode="protanopia"] #game canvas { filter: saturate(.76) hue-rotate(18deg); }

@@ -107,8 +107,18 @@ export const Menu = {
     const width = opts.width ?? Math.ceil(label.width) + (opts.padX ?? 20) * 2;
     const height = Math.ceil(label.height) + (opts.padY ?? 10) * 2;
     const bg = scene.add.rectangle(0, 0, width, height, PALETTE.BG_NEAR).setStrokeStyle(2, PALETTE.ACCENT);
+    // Derive the hit box from setSize instead of passing an explicit
+    // Geom.Rectangle. Phaser's InputManager.pointWithinHitArea already
+    // normalizes the local pointer by the object's displayOrigin (half the
+    // container size), so handing it a CENTRE-based rect like
+    // `Rectangle(-w/2, -h/2, w, h)` applies that half-size shift TWICE: the
+    // clickable region ends up offset by (-w/2, -h/2) and only overlaps the
+    // button's top-left quadrant. Measured on the title screen before this fix:
+    // the 335x66 "출격" button was only clickable 124px left and 33px above
+    // where it was drawn. setSize-derived hit boxes are already origin-correct,
+    // and useHandCursor gives the pointer feedback a canvas otherwise lacks.
     const container = scene.add.container(x, y, [bg, label]).setSize(width, height)
-      .setInteractive(new Phaser.Geom.Rectangle(-width / 2, -height / 2, width, height), Phaser.Geom.Rectangle.Contains);
+      .setInteractive({ useHandCursor: true });
     scene.input.setTopOnly(true);
     const reduced = prefersReducedMotion(AudioManager.get(scene).getSettings());
     let fired = false;

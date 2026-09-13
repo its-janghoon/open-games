@@ -115,10 +115,13 @@ export function projectionScale(
 ): ProjectionScale {
   const usableW = proj.viewWidth - proj.margin * 2;
   const usableH = proj.viewHeight - proj.margin * 2;
-  // Raw dimetric extents of the centred world: dx in [-W, W] (span 2W),
-  // dy in [-W/2, W/2] (span W).
-  const rawWidth = proj.worldSize * 2;
-  const rawHeight = proj.worldSize;
+  // Raw AXIS-ALIGNED extents of the centred world: dx in [-W/2, W/2] (span W),
+  // dy in [-W/4, W/4] (span W/2). The old rotated projection spanned 2W x W, so
+  // dropping the rotation halves both extents and therefore DOUBLES both fit
+  // scales - the world fills the same screen box at twice the size, which is the
+  // "make the map bigger" half of the change.
+  const rawWidth = proj.worldSize;
+  const rawHeight = proj.worldSize / 2;
   return { sx: usableW / rawWidth, sy: usableH / rawHeight };
 }
 
@@ -138,9 +141,24 @@ export function worldToScreen(
   // Centre the world about its middle.
   const cx = p.x - half;
   const cy = p.y - half;
-  // 2:1 dimetric rotation.
-  const dx = cx - cy;
-  const dy = (cx + cy) / 2;
+  // AXIS-ALIGNED projection: world +x goes right, world +y goes DOWN, with a
+  // 2:1 vertical squash for the 2.5D read.
+  //
+  // This used to apply a 45-degree dimetric rotation (`dx = cx - cy`,
+  // `dy = (cx + cy) / 2`), which drew the square world as a DIAMOND. The
+  // minimap, however, plots raw world fractions (`left: x%`, `top: y%`) on an
+  // axis-aligned square, so the two disagreed: the ally base sits at world
+  // (low x, high y), which the rotation put at screen LEFT-CENTRE while the
+  // minimap put it BOTTOM-LEFT. Reading one against the other meant mentally
+  // rotating 45 degrees. Dropping the rotation makes the main view share the
+  // minimap's orientation exactly.
+  //
+  // It also makes the map BIGGER for free: the rotated extents spanned
+  // 2*worldSize horizontally, the unrotated ones span worldSize, so both fit
+  // scales double (see projectionScale) and the world fills the same screen box
+  // at twice the size.
+  const dx = cx;
+  const dy = cy / 2;
   return {
     x: proj.viewWidth / 2 + dx * sx,
     y: proj.viewHeight / 2 + dy * sy,
@@ -165,11 +183,10 @@ export function screenToWorld(
   // Undo translate + (per-axis) scale to recover the raw dimetric coordinates.
   const dx = (s.x - proj.viewWidth / 2) / sx;
   const dy = (s.y - proj.viewHeight / 2) / sy;
-  // Invert the rotation:
-  //   dx = cx - cy,  dy = (cx + cy) / 2
-  //   => cx = dy + dx / 2,  cy = dy - dx / 2
-  const cx = dy + dx / 2;
-  const cy = dy - dx / 2;
+  // Invert the axis-aligned projection:
+  //   dx = cx,  dy = cy / 2   =>   cx = dx,  cy = dy * 2
+  const cx = dx;
+  const cy = dy * 2;
   return { x: cx + half, y: cy + half };
 }
 

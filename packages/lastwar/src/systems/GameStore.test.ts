@@ -3,6 +3,7 @@ import { GameStore } from './GameStore';
 import { SaveManager, memoryStorage, SAVE_KEY, SAVE_VERSION } from './SaveManager';
 import { HERO_ORDER } from '../config/Heroes';
 import { makeHeroInstance } from './Heroes';
+import { duplicateShards } from './Recruit';
 
 /**
  * Tests for the full-state runtime accessor. GameStore owns the whole v2
@@ -177,12 +178,26 @@ describe('GameStore', () => {
     const store = GameStore.createWith(storage);
     store.state.heroes.shards = 1000;
     for (const id of HERO_ORDER) store.state.heroes.roster[id] = makeHeroInstance(id);
+
+    // Recruiting ALSO advances the daily 'recruit' arms-race tasks, and completing
+    // one pays shards directly AND can cross a points milestone that pays again -
+    // both land in this same balance via applyRewardNoPersist. Worse, the active
+    // daily set is drawn from a per-day seed (MISSIONS.DAILY_TASK_COUNT of
+    // MISSIONS.DAILY_TEMPLATES), so whether a recruit task is in play at all
+    // depends on the calendar date: asserting a bare shard delta made this test
+    // pass or fail by the day it ran on. Exhaust the recruit tasks FIRST (any
+    // amount >= recruit_2's target of 5 completes every recruit template, and if
+    // none was drawn there was nothing to pay out anyway), so the measured pull
+    // below moves shards only by its own economics.
+    store.recruitMany(10);
+
     const shardsBefore = store.shards();
+    const dupesBefore = Object.fromEntries(HERO_ORDER.map((id) => [id, store.hero(id)!.dupes]));
     const second = store.recruitOne(4242);
     expect(second.duplicate).toBe(true);
-    expect(second.shardsGained).toBeGreaterThan(0);
+    expect(second.shardsGained).toBe(duplicateShards(second.grade));
     expect(store.shards()).toBe(shardsBefore - 20 + second.shardsGained);
-    expect(store.hero(second.heroId)!.dupes).toBe(1);
+    expect(store.hero(second.heroId)!.dupes).toBe(dupesBefore[second.heroId] + 1);
   });
 
   it('hero progression spends shards and persists', () => {

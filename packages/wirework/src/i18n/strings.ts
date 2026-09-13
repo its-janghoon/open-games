@@ -85,7 +85,12 @@ export const STRINGS = {
   'hud.lowHp': { en: 'LOW HP', ko: '체력 위험' },
   'hud.emptyCharge': { en: 'CHARGE EMPTY', ko: '전하 없음' },
   'hud.breach': { en: 'RING BREACH', ko: '방호환 돌파' },
-  'hud.hint': { en: 'WASD Move  Shift Dash  L-Click Tether  R-Click Arc Cutter  Q/E Reel  P Pause', ko: 'WASD 이동  Shift 대시  좌클릭 테더  우클릭 아크 절단  Q/E 감기  P 일시정지' },
+  // The tether is HOLD-to-use: GrappleSystem releases the moment `fireHeld`
+  // goes false, so a quick CLICK fires the hook and cancels it on the same
+  // frame - it never leaves the player. The old hint said only "L-Click
+  // Tether", which read as click-to-fire and made the core mechanic look
+  // broken. Say "hold" explicitly, and name the release as the payoff.
+  'hud.hint': { en: 'WASD Move  Shift Dash  HOLD L-Click Tether, release to fling  R-Click Arc Cutter  Q/E Reel  P Pause', ko: 'WASD 이동  Shift 대시  좌클릭 길게 눌러 테더, 떼면 발사  우클릭 아크 절단  Q/E 감기  P 일시정지' },
   'hud.wave': { en: 'WAVE {wave} / {total}', ko: '웨이브 {wave} / {total}' },
   'hud.incoming': { en: '{count} MACHINES INBOUND', ko: '침입 기계 {count}기 접근' },
   'hud.status': { en: 'SCORE {score}\nWAVE {wave}/{total}\nCITIZENS {saved}/{citizensTotal}\nTIME {time}s  {input}', ko: '점수 {score}\n웨이브 {wave}/{total}\n시민 {saved}/{citizensTotal}\n시간 {time}초  {input}' },
@@ -93,6 +98,12 @@ export const STRINGS = {
   'hud.countdown': { en: 'NEXT WAVE {seconds}s', ko: '다음 웨이브 {seconds}초' },
   'hud.critical': { en: 'CRITICAL', ko: '치명타' },
   'hud.wire': { en: 'WIRE', ko: '테더' },
+  // Tether onboarding. Deliberately phrased as two beats (hold, then release)
+  // because that is exactly the pair a click misses.
+  'tutorial.tetherHold': { en: 'HOLD to tether the ring', ko: '길게 눌러 방호환에 붙어라' },
+  'tutorial.tetherRelease': { en: 'Now RELEASE to fling', ko: '이제 떼서 날아라' },
+  'tutorial.tetherDone': { en: 'Good. Defend the ring.', ko: '좋다. 방호환을 지켜라.' },
+  'tutorial.skip': { en: 'P to skip', ko: 'P 건너뛰기' },
   'hud.phase.spawning': { en: 'SPAWNING', ko: '침입 중' },
   'hud.phase.clearing': { en: 'CLEAR REMAINING MACHINES', ko: '잔존 기계 제거' },
   'hud.phase.done': { en: 'SECURED', ko: '방어 완료' },

@@ -116,7 +116,14 @@ export const Menu = {
 
     const container = scene.add.container(x, y, [bg, label]);
     container.setSize(w, h);
-    container.setInteractive(new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h), Phaser.Geom.Rectangle.Contains);
+    // Derive the hit box from setSize rather than passing an explicit
+    // Geom.Rectangle. InputManager.pointWithinHitArea already normalizes the
+    // local pointer by displayOrigin (half the container size), so a CENTRE-based
+    // rect like `Rectangle(-w/2, -h/2, w, h)` applies that shift twice and the
+    // clickable region lands (-w/2, -h/2) off, overlapping only the button's
+    // top-left quadrant. useHandCursor also gives the pointer feedback that a
+    // canvas otherwise has no equivalent of.
+    container.setInteractive({ useHandCursor: true });
 
     // Only the topmost interactive object under the pointer should fire, so a
     // passive/transparent rect under a button can never steal its press.

@@ -110,23 +110,37 @@ import {
   DEFAULT_PROJECTION,
 } from '../rift/iso';
 import {
-  CHAMPION_PREWARM_POSES,
-  SpriteFactory,
   type ChampionPose,
   type SpriteSize,
-  type SpriteTextureHandle,
 } from '../render/sprites';
+import {
+  sheetManifest,
+  championSheetKey,
+  minionSheetKey,
+  structureSheetKey,
+  markerSheetKey,
+  vfxSheetKey,
+  resolveChampionSheetId,
+  frameForPose,
+  CHAMPION_FRAME,
+  MINION_FRAME,
+  STRUCTURE_FRAME,
+  MARKER_FRAME,
+  VFX_FRAME,
+  CHAMPION_FOOT_FRAC,
+  MINION_FOOT_FRAC,
+  STRUCTURE_FOOT_FRAC,
+  MARKER_FOOT_FRAC,
+} from '../render/sheets';
 import type { VfxKind } from '../render/svgArt';
 import {
   classifyHit,
   shakeForHit,
-  shouldShake,
   structureDestructionShake,
   sparkCountForHit,
   knockbackForHit,
   knockbackDir,
   popupStyleForHit,
-  MAX_SHAKE_INTENSITY,
   type HitImportance,
   type ShakeSpec,
 } from '../render/juice';
@@ -233,9 +247,57 @@ const OFF_Y = (VIEW_H - WORLD_SIZE * SCALE) / 2;
  *   - CAMERA_BOUNDS_PADDING: screen px added around the projected diamond so the
  *     camera can keep the champion centred near the map edges.
  */
-const CAMERA_ZOOM = 2;
+/**
+ * Camera magnification over the projected world. Raised from 2 to 2.8: at 2 the
+ * un-rotated world (860x600 logical px) sat far enough back that the lane read
+ * as a distant diagram rather than a battlefield. 2.8 puts the viewport at
+ * ~587x229 world-screen units, still comfortably INSIDE the world so the
+ * zero-padding camera bounds never expose void.
+ */
+const CAMERA_ZOOM = 2.8;
 const CAMERA_LERP = 0.1;
-const CAMERA_BOUNDS_PADDING = 220;
+
+/**
+ * RENDER SMOOTHING (judder fix).
+ *
+ * The simulation advances in FIXED {@link SIMULATION_TICK_SECONDS} steps from an
+ * accumulator, but the display does not run at exactly 60Hz - measured on a
+ * software-rendered box this scene draws at ~55fps (mean frame 18.1ms, stdev
+ * 2.7ms, worst 33.7ms) against a 16.67ms tick. Because the mean frame is LONGER
+ * than one tick the accumulator periodically spends TWO ticks in a single frame,
+ * so a unit whose screen position was written straight from `unit.pos` advanced
+ * double distance on those frames and single on the rest: a rhythmic stutter,
+ * which is what read as the world "shaking".
+ *
+ * The fix is render-only: ease the drawn container toward the simulated point
+ * instead of snapping to it. `unit.pos` and every timer are untouched, so
+ * determinism is unchanged - this only decouples what is DRAWN from the tick
+ * boundary. Time-constant form (not a fixed per-frame factor) so the smoothing
+ * behaves identically at any frame rate.
+ */
+const RENDER_SMOOTH_TAU_MS = 30;
+
+/**
+ * Above this screen distance the drawn position SNAPS instead of easing, so a
+ * teleport - spawn, respawn, recall, a blink ability - never slides the sprite
+ * across the map. Ordinary movement is a few px per frame, well under this.
+ */
+const RENDER_SNAP_DISTANCE_PX = 72;
+/**
+ * Screen padding added around the projected world for the camera's scroll
+ * bounds. ZERO: the camera clamps exactly at the world edge.
+ *
+ * This was 220, which let the camera scroll a fifth of a screen PAST the world
+ * on every side so the champion could stay perfectly centred near a corner. The
+ * cost was visible black void beyond the map edge - tolerable when the world
+ * projected larger than the viewport, glaring once the projection was
+ * un-rotated (the world now spans 860x600 logical px while the camera viewport
+ * at CAMERA_ZOOM is only ~822x320, so the viewport fits INSIDE the world and any
+ * padding at all is pure void). Clamping instead stops the camera at the edge
+ * and lets the champion sit off-centre there, which is what every lane-pusher
+ * does.
+ */
+const CAMERA_BOUNDS_PADDING = 0;
 
 const NEXUS_HP = 5500;
 const NEXUS_TURRET_HP = 2700;
@@ -333,6 +395,34 @@ function projScale(): number {
 
 /** Depth for transient VFX so they render above all entities. */
 const VFX_DEPTH = 200000;
+
+/**
+ * FOG OF WAR.
+ *
+ * Drawn as a single RenderTexture covering the projected world, filled with
+ * near-black and then ERASED with a soft radial hole at every living ally's
+ * position. It sits above units so unexplored ground and anything standing in it
+ * is darkened; ally units are inside their own holes so they stay lit. Enemy
+ * entities outside every ally's vision are additionally hidden outright, so fog
+ * conceals information and not just pixels.
+ *
+ * Vision radii are in WORLD units (WORLD_SIZE is 3000) and deliberately differ
+ * per unit class, so a lone minion wave does not light a lane the way a champion
+ * does and warding a structure still matters.
+ */
+const FOG_DEPTH = VFX_DEPTH - 1;
+const FOG_ALPHA = 0.86;
+/*
+ * Vision radii in WORLD units against a 3000-unit map. The first cut used
+ * 620/380/520, which sounded modest but was not: at the projection's horizontal
+ * scale a 620-unit radius is a 178px hole on an 860px-wide projected map, and
+ * with five champions, both minion waves and ELEVEN ally structures all carving
+ * one, the fog was erased edge to edge and appeared not to exist. These values
+ * light roughly a tenth of the map width per champion.
+ */
+const VISION_RADIUS_CHAMPION = 300;
+const VISION_RADIUS_MINION = 170;
+const VISION_RADIUS_STRUCTURE = 230;
 
 /**
  * Per-champion AI/simulation state for a NON-human champion. Each bot owns its
@@ -516,6 +606,12 @@ export default class BattleScene extends Phaser.Scene {
   private structures: Entity[] = [];
   private minions: Entity[] = [];
   private allEntities: Entity[] = [];
+  /** Fog-of-war overlay; null until {@link setupFog} runs (or if unsupported). */
+  private fog: Phaser.GameObjects.RenderTexture | null = null;
+  /** Screen-space rect the fog texture covers, cached from the projection. */
+  private fogRect = { x: 0, y: 0, width: 0, height: 0 };
+  /** Baked hole radius in SCREEN px, keyed by the WORLD vision radius. */
+  private fogHoleRadiusPx = new Map<number, number>();
   /** Constant-time authoritative entity lookup for targeting and impacts. */
   private entityById = new Map<string, Entity>();
   /** Last acquired target per acting entity; retained until it becomes invalid. */
@@ -582,8 +678,11 @@ export default class BattleScene extends Phaser.Scene {
   private abilityKeys!: Record<CooldownKey, Phaser.Input.Keyboard.Key>;
   private touchCastHandler?: EventListener;
 
-  /** Procedural sprite/texture factory (baked once, cached, reused). */
-  private sprites!: SpriteFactory;
+  // The procedural SpriteFactory field was removed: champions, minions,
+  // structures, markers and VFX all draw from pre-generated pixel sheets loaded
+  // in `preload`, so nothing in the battle rasterizes SVG at runtime any more.
+  // `sprites.ts` itself is retained (it is unit-tested, and `svgArt` still backs
+  // the DOM champion art in champion select) but the scene no longer uses it.
   /** Live cosmetic objects only; gameplay impacts are tracked separately above. */
   private transientVfx = new Set<Phaser.GameObjects.GameObject>();
   private damageTexts = new Set<Phaser.GameObjects.Text>();
@@ -597,13 +696,6 @@ export default class BattleScene extends Phaser.Scene {
   private ended = false;
   /** Guards the cosmetic kill slow-mo so rapid kills cannot stack/strand it. */
   private slowMoActive = false;
-  /**
-   * Real-time timestamp (performance clock, ms) of the last camera shake that
-   * actually fired. Used to throttle shakes so the constant 5v5 combat cannot
-   * coalesce into a permanent tremor. -Infinity so the first shake never
-   * throttles.
-   */
-  private lastShakeAt = Number.NEGATIVE_INFINITY;
   /**
    * Per-frame living-unit snapshot, rebuilt once at the top of {@link update}
    * before the champion/minion/turret loops that call {@link findTarget}. This
@@ -638,7 +730,6 @@ export default class BattleScene extends Phaser.Scene {
     this.damageTexts.clear();
     this.minionSequence = 0;
     this.slowMoActive = false;
-    this.lastShakeAt = Number.NEGATIVE_INFINITY;
     this.mode = data.mode ?? 'conquest';
     this.rules = rulesForMode(this.mode);
     this.lanes = activeLanesForMode(this.mode);
@@ -736,8 +827,8 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   create() {
+    this.applyPixelArtFiltering();
     this.cameras.main.setBackgroundColor('#05140c');
-    this.sprites = new SpriteFactory(this);
     this.input.enabled = false;
     this.drawMap();
 
@@ -748,6 +839,7 @@ export default class BattleScene extends Phaser.Scene {
     this.aimPreview = this.add.graphics().setDepth(VFX_DEPTH - 1);
     this.setupInput();
     this.setupCamera();
+    this.setupFog();
     this.syncVisuals();
     this.pushHud();
     this.nextHudAt = HUD_INTERVAL_SECONDS;
@@ -771,13 +863,6 @@ export default class BattleScene extends Phaser.Scene {
     }
     this.cameras.main.shakeEffect.reset();
     this.cameras.main.flashEffect.reset();
-  }
-
-  private trackCritical<T extends SpriteTextureHandle>(handle: T): T {
-    if (!this.sceneReady && !this.shuttingDown) {
-      this.criticalTextureReadiness.push(handle.ready.catch(() => 'failed'));
-    }
-    return handle;
   }
 
   /** Texture failures and browser decode stalls fall back to placeholders. */
@@ -813,12 +898,153 @@ export default class BattleScene extends Phaser.Scene {
    * keep working; none of this touches unit.pos or sim timers (determinism
    * unchanged). Called AFTER spawnTeams() so {@link player} exists to follow.
    */
+  /**
+   * Load the pre-generated pixel-art spritesheets (see `tools/gen_sprites.py`
+   * and {@link sheetManifest}). Champions, minions and structures are drawn from
+   * these; markers and VFX still come from the procedural SpriteFactory.
+   */
+  preload() {
+    for (const sheet of sheetManifest()) {
+      if (this.textures.exists(sheet.key)) continue;
+      this.load.spritesheet(sheet.key, sheet.url, {
+        frameWidth: sheet.frameWidth,
+        frameHeight: sheet.frameHeight,
+      });
+    }
+  }
+
+  /**
+   * Sample the generated pixel-art sheets with NEAREST.
+   *
+   * PhaserGame.tsx sets `render: { antialias: true }` so the Phaser Text layer
+   * scales smoothly (a global `pixelArt: true` would nearest-minify oversized
+   * glyph textures and shred small Korean labels). But that same flag is what
+   * TextureSource reads for its DEFAULT scaleMode, so without this the 54
+   * hand-generated sprite sheets were being bilinear-smoothed - the pixel art
+   * was quietly blurred. Filtering per-texture keeps both correct.
+   */
+  private applyPixelArtFiltering() {
+    for (const sheet of sheetManifest()) {
+      if (this.textures.exists(sheet.key)) {
+        this.textures.get(sheet.key).setFilter(Phaser.Textures.FilterMode.NEAREST);
+      }
+    }
+  }
+
+  /**
+   * Build the fog-of-war overlay: a RenderTexture spanning the projected world
+   * plus a pre-baked soft "vision hole" texture that {@link updateFog} erases
+   * with. Baking the hole ONCE and erasing a texture per unit keeps the per-frame
+   * cost to a handful of draws instead of re-rasterizing a gradient every frame.
+   */
+  private setupFog() {
+    const bounds = projectedWorldBounds(DEFAULT_PROJECTION, 0);
+    this.fogRect = { x: bounds.minX, y: bounds.minY, width: bounds.width, height: bounds.height };
+
+    // One hole texture PER radius, so a minion really does reveal less than a
+    // champion. RenderTexture.erase takes a texture key with no scale argument,
+    // so the size has to be baked in rather than applied at erase time.
+    const { sx } = projectionScale(DEFAULT_PROJECTION);
+    for (const world of [VISION_RADIUS_CHAMPION, VISION_RADIUS_MINION, VISION_RADIUS_STRUCTURE]) {
+      const r = Math.max(6, Math.round(world * sx));
+      this.fogHoleRadiusPx.set(world, r);
+      const key = `fog-hole-${world}`;
+      if (this.textures.exists(key)) continue;
+      // Soft-edged disc: concentric rings stepping alpha down so the fog fades
+      // out instead of showing a hard circular cut.
+      const g = this.make.graphics({ x: 0, y: 0 }, false);
+      const steps = 12;
+      for (let i = steps; i >= 1; i--) {
+        const t = i / steps;
+        g.fillStyle(0xffffff, (1 - t) * 0.18 + 0.03);
+        g.fillCircle(r, r, r * t);
+      }
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(r, r, r * 0.5);
+      g.generateTexture(key, r * 2, r * 2);
+      g.destroy();
+    }
+
+    this.fog = this.add.renderTexture(
+      this.fogRect.x,
+      this.fogRect.y,
+      Math.max(1, Math.ceil(this.fogRect.width)),
+      Math.max(1, Math.ceil(this.fogRect.height)),
+    );
+    this.fog.setOrigin(0, 0);
+    this.fog.setDepth(FOG_DEPTH);
+  }
+
+  /**
+   * Repaint the fog and apply vision to enemies.
+   *
+   * Ally-side living units carve holes; every enemy entity is then hidden unless
+   * it falls inside one of those vision radii. Structures are exempt from being
+   * hidden - a turret's location is public knowledge in a lane pusher, and
+   * blinking them in and out would make the map unreadable.
+   */
+  private updateFog() {
+    const fog = this.fog;
+    if (!fog || !fog.active) return;
+
+    // Collect ally vision sources once; reused for both the holes and the
+    // enemy-visibility test so the two can never disagree.
+    const sources: { pos: Vec2; world: number; r2: number }[] = [];
+    for (const e of this.allEntities) {
+      if (e.unit.team !== 'ally' || e.unit.dead) continue;
+      const radius =
+        e.unit.kind === 'minion' || e.unit.kind === 'monster'
+          ? VISION_RADIUS_MINION
+          : e.unit.kind === 'turret' || e.unit.kind === 'nexus'
+            ? VISION_RADIUS_STRUCTURE
+            : VISION_RADIUS_CHAMPION;
+      sources.push({ pos: e.unit.pos, world: radius, r2: radius * radius });
+    }
+
+    fog.clear();
+    fog.fill(0x01060b, FOG_ALPHA);
+    for (const s of sources) {
+      const r = this.fogHoleRadiusPx.get(s.world);
+      if (r === undefined) continue;
+      const screen = project(s.pos);
+      fog.erase(
+        `fog-hole-${s.world}`,
+        screen.x - this.fogRect.x - r,
+        screen.y - this.fogRect.y - r,
+      );
+    }
+
+    for (const e of this.allEntities) {
+      if (e.unit.team !== 'enemy') continue;
+      if (e.unit.kind === 'turret' || e.unit.kind === 'nexus') continue;
+      if (e.unit.dead) continue;
+      let seen = false;
+      for (const s of sources) {
+        const dx = e.unit.pos.x - s.pos.x;
+        const dy = e.unit.pos.y - s.pos.y;
+        if (dx * dx + dy * dy <= s.r2) {
+          seen = true;
+          break;
+        }
+      }
+      e.container.setVisible(seen);
+      e.shadow?.setVisible(seen);
+    }
+  }
+
   private setupCamera() {
     const cam = this.cameras.main;
     const bounds = projectedWorldBounds(DEFAULT_PROJECTION, CAMERA_BOUNDS_PADDING);
     cam.setBounds(bounds.minX, bounds.minY, bounds.width, bounds.height);
     cam.setZoom(CAMERA_ZOOM);
-    cam.startFollow(this.player.container, true, CAMERA_LERP, CAMERA_LERP);
+    // roundPixels MUST stay false here. `startFollow`'s 2nd argument snaps the
+    // camera's scroll to whole integers every frame; combined with the gentle
+    // CAMERA_LERP the scroll advances by SUB-pixel amounts per frame, so
+    // rounding quantises it and the entire world visibly stair-steps back and
+    // forth - the "shaking" this camera used to exhibit. The fractional
+    // Scale.FIT resample of the canvas then amplifies it further. lastwar
+    // documents the same trap in its render config (`roundPixels: false`).
+    cam.startFollow(this.player.container, false, CAMERA_LERP, CAMERA_LERP);
     cam.setFollowOffset(0, 0);
   }
 
@@ -1071,9 +1297,13 @@ export default class BattleScene extends Phaser.Scene {
    */
   private spawnMarker(variant: 'jungle' | 'dragon' | 'baron' | 'herald', worldPos: Vec2) {
     const screen = worldToScreen(worldPos, DEFAULT_PROJECTION);
-    const { key, size } = this.trackCritical(
-      this.sprites.ensure({ kind: 'marker', variant }),
-    );
+    // Jungle camps and objectives are drawn from their neutral pixel sheets.
+    const key = markerSheetKey(variant);
+    const size: SpriteSize = {
+      width: MARKER_FRAME.width,
+      height: MARKER_FRAME.height,
+      footY: Math.round(MARKER_FRAME.height * MARKER_FOOT_FRAC),
+    };
     const heightPx = variant === 'jungle' ? 4 : 10;
     if (variant !== 'jungle') {
       const shadow = this.add.ellipse(screen.x, screen.y, size.width * 0.8, size.width * 0.36, 0x000000, 0.32);
@@ -1170,23 +1400,21 @@ export default class BattleScene extends Phaser.Scene {
       attackSpeed: champion.stats.attackSpeed,
       moveSpeed: champion.stats.moveSpeed * SCALE,
     });
-    const spriteSpec = {
-      kind: 'champion' as const,
-      championId: champion.id,
-      role: champion.role,
-      accent: champion.accentColor,
-      team,
+    // NOTE: the old SpriteFactory pose PREWARM was removed here. It rasterized
+    // four SVG variants per player-facing champion to warm a cache the battle no
+    // longer reads - every pose is a frame of the pre-generated sheet, already
+    // resident after `preload`. Keeping it would have burned four rasterizations
+    // per champion on textures nothing draws.
+    // Champions are drawn from the pre-generated pixel-art sheet. The pose is a
+    // FRAME index into that sheet (see frameForPose), so a pose change is a
+    // frame swap rather than a freshly rasterized texture.
+    const sheetId = resolveChampionSheetId(champion.id, champion.role);
+    const key = championSheetKey(sheetId, team);
+    const size: SpriteSize = {
+      width: CHAMPION_FRAME.width,
+      height: CHAMPION_FRAME.height,
+      footY: Math.round(CHAMPION_FRAME.height * CHAMPION_FOOT_FRAC),
     };
-    // Player and facing-enemy benchmark poses are critical for first battle
-    // paint. Other finite poses remain lazily cached by SpriteFactory.
-    if (id === 'player' || id === 'enemy') {
-      for (const handle of this.sprites.prewarmChampion(spriteSpec, CHAMPION_PREWARM_POSES)) {
-        this.trackCritical(handle);
-      }
-    }
-    const { key, size } = this.trackCritical(
-      this.sprites.ensure({ ...spriteSpec, pose: 'idle' }),
-    );
     const heightPx = CHAMPION_HEIGHT_PX;
     const body = this.makeBillboard(key, size);
     // Only the player-facing picks carry nameplates. Labeling all ten units at
@@ -1256,21 +1484,11 @@ export default class BattleScene extends Phaser.Scene {
     const lockedUntil = entity.poseLockedUntil ?? 0;
     const currentPriority = entity.posePriority ?? 0;
     if (this.elapsed < lockedUntil && priority < currentPriority) return;
-    if (entity.championPose !== pose) {
-      const team = entity.unit.team === 'enemy' ? 'enemy' : 'ally';
-      const { key, size } = this.sprites.ensure({
-        kind: 'champion',
-        championId: champion.id,
-        role: champion.role,
-        accent: champion.accentColor,
-        team,
-        pose,
-      });
-      entity.body.setTexture(key);
-      entity.body.setOrigin(0.5, size.footY / size.height);
-      entity.body.setDisplaySize(size.width, size.height);
-      entity.championPose = pose;
-    }
+    // A pose is now a FRAME of the champion's pixel-art sheet, so switching pose
+    // costs an index change instead of rasterizing and caching a new texture.
+    // The texture itself never changes, so origin/display size stay valid.
+    entity.championPose = pose;
+    entity.body.setFrame(frameForPose(pose, this.elapsed));
     entity.poseLockedUntil = holdMs > 0 ? this.elapsed + holdMs / 1000 : this.elapsed;
     entity.posePriority = priority;
   }
@@ -1301,7 +1519,6 @@ export default class BattleScene extends Phaser.Scene {
     // Combat kind: nexus for the nexus, turret for anything that shoots,
     // 'nexus'-gated inhibitors are modeled as turrets that do not attack.
     const combatKind: Unit['kind'] = node.kind === 'nexus' ? 'nexus' : 'turret';
-    const accent = team === 'ally' ? this.playerChampion.accentColor : this.enemyChampion.accentColor;
     const unit = this.makeUnit(node.id, combatKind, team, pos, {
       maxHp,
       ad: isTurret ? TURRET_DAMAGE : 0,
@@ -1314,9 +1531,12 @@ export default class BattleScene extends Phaser.Scene {
       node.kind === 'nexus' ? 'nexus' : node.kind === 'inhibitor' ? 'inhibitor' : 'turret';
     const heightPx =
       tier === 'nexus' ? NEXUS_HEIGHT_PX : tier === 'inhibitor' ? INHIBITOR_HEIGHT_PX : TURRET_HEIGHT_PX;
-    const { key, size } = this.trackCritical(
-      this.sprites.ensure({ kind: 'structure', tier, accent, team }),
-    );
+    const key = structureSheetKey(tier, team === 'enemy' ? 'enemy' : 'ally');
+    const size: SpriteSize = {
+      width: STRUCTURE_FRAME.width,
+      height: STRUCTURE_FRAME.height,
+      footY: Math.round(STRUCTURE_FRAME.height * STRUCTURE_FOOT_FRAC),
+    };
     const body = this.makeBillboard(key, size);
     const container = this.add.container(pos.x, pos.y, [body]);
     const shadow = this.makeShadow(size.width * 0.8);
@@ -1587,6 +1807,9 @@ export default class BattleScene extends Phaser.Scene {
     }
     this.refreshChampionLocomotionPoses();
     this.syncVisuals();
+    // Fog runs AFTER syncVisuals so it reads the positions actually drawn this
+    // frame, and so its enemy-hiding is the last word on visibility.
+    this.updateFog();
     this.syncTrapVisuals();
     this.syncAimPreview();
   }
@@ -1981,8 +2204,14 @@ export default class BattleScene extends Phaser.Scene {
         moveSpeed: stats.moveSpeed * SCALE,
       },
     );
-    const accent = team === 'ally' ? this.playerChampion.accentColor : this.enemyChampion.accentColor;
-    const { key, size } = this.sprites.ensure({ kind: 'minion', type, accent, team });
+    // Minions carry their OWN palette from the sheet (they no longer borrow the
+    // team champion's accent) plus a team-coloured rim for the ally/enemy tell.
+    const key = minionSheetKey(type, team === 'enemy' ? 'enemy' : 'ally');
+    const size: SpriteSize = {
+      width: MINION_FRAME.width,
+      height: MINION_FRAME.height,
+      footY: Math.round(MINION_FRAME.height * MINION_FOOT_FRAC),
+    };
     const body = this.makeBillboard(key, size);
     const container = this.add.container(screenPos.x, screenPos.y, [body]);
     const shadow = this.makeShadow(size.width * 0.7);
@@ -2836,7 +3065,12 @@ export default class BattleScene extends Phaser.Scene {
       attackSpeed: 0.7,
       moveSpeed: 0,
     });
-    const { key, size } = this.sprites.ensure({ kind: 'marker', variant: id });
+    const key = markerSheetKey(id);
+    const size: SpriteSize = {
+      width: MARKER_FRAME.width,
+      height: MARKER_FRAME.height,
+      footY: Math.round(MARKER_FRAME.height * MARKER_FOOT_FRAC),
+    };
     const body = this.makeBillboard(key, size);
     const container = this.add.container(pos.x, pos.y, [body]);
     const shadow = this.makeShadow(size.width * 0.9);
@@ -2881,7 +3115,12 @@ export default class BattleScene extends Phaser.Scene {
         attackSpeed: 0.7,
         moveSpeed: 260 * SCALE,
       });
-      const { key, size } = this.sprites.ensure({ kind: 'marker', variant: 'jungle' });
+      const key = markerSheetKey('jungle');
+      const size: SpriteSize = {
+      width: MARKER_FRAME.width,
+      height: MARKER_FRAME.height,
+      footY: Math.round(MARKER_FRAME.height * MARKER_FOOT_FRAC),
+    };
       const body = this.makeBillboard(key, size);
       body.setTint(tintByType[camp.type]).setScale(member.scale);
       const container = this.add.container(pos.x, pos.y, [body]);
@@ -3425,19 +3664,42 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private syncVisuals() {
+    // Frame-rate-independent easing weight for this frame. Derived from the real
+    // frame delta so the smoothing constant means the same thing at 30, 55 or
+    // 144fps. See RENDER_SMOOTH_TAU_MS for why the drawn position is eased.
+    const deltaMs = Phaser.Math.Clamp(this.game.loop.delta, 1, 100);
+    const ease = 1 - Math.exp(-deltaMs / RENDER_SMOOTH_TAU_MS);
     for (const e of this.allEntities) {
       // Project the entity's flat ground pixel to its on-screen dimetric point.
       const ground = project(e.unit.pos);
-      // Ground shadow sits on the floor at the projected point.
+      // Billboard is lifted up by its height so it reads as standing.
+      const targetX = ground.x;
+      const targetY = ground.y - e.heightPx;
+      // Ease toward the simulated point; snap on a teleport-sized jump (and on
+      // the first placement, where the container still sits at the origin).
+      const dx = targetX - e.container.x;
+      const dy = targetY - e.container.y;
+      if (Math.abs(dx) + Math.abs(dy) > RENDER_SNAP_DISTANCE_PX) {
+        e.container.setPosition(targetX, targetY);
+      } else {
+        e.container.setPosition(e.container.x + dx * ease, e.container.y + dy * ease);
+      }
+      // Ground shadow follows the DRAWN position, not the simulated one, so the
+      // shadow never detaches from the eased billboard above it.
       if (e.shadow) {
-        e.shadow.setPosition(ground.x, ground.y);
+        e.shadow.setPosition(e.container.x, e.container.y + e.heightPx);
         e.shadow.setDepth(depthForPixel(e.unit.pos) + DEPTH_SHADOW_BIAS);
         e.shadow.setVisible(e.container.visible);
       }
-      // Billboard is lifted up by its height so it reads as standing, and
-      // depth-sorted by its projected ground point (+ tiny height tie-break).
-      e.container.setPosition(ground.x, ground.y - e.heightPx);
+      // Depth still sorts by the SIMULATED point: easing the sort key too would
+      // let two units flicker past each other around a crossing.
       e.container.setDepth(depthForPixel(e.unit.pos, e.heightPx));
+      // Drive the two-frame walk cycle. `setChampionPose` only fires when the
+      // pose CHANGES, so without this a walking champion would hold a single
+      // RUN frame; re-deriving the frame every render is what animates it.
+      if (e.champion && e.championPose === 'move' && e.body.active) {
+        e.body.setFrame(frameForPose('move', this.elapsed));
+      }
       if (e.hpBar) {
         const full = e.hpBar.getData('width') as number;
         const pct = Phaser.Math.Clamp(e.unit.hp / e.unit.maxHp, 0, 1);
@@ -3528,49 +3790,26 @@ export default class BattleScene extends Phaser.Scene {
     });
   }
 
-  private shake(intensity: number, duration = 160) {
-    if (this.reducedMotion || intensity <= 0 || duration <= 0) return;
-    // Ceiling lowered well below the old 0.03 so even a legitimate on-screen
-    // shake is a gentle bump, never a lurch. Matches juice.MAX_SHAKE_INTENSITY.
-    this.cameras.main.shake(duration, Phaser.Math.Clamp(intensity, 0.002, MAX_SHAKE_INTENSITY));
-    this.lastShakeAt = this.time.now;
-  }
-
   /**
-   * Guarded entry point for ALL camera shake. A shake only fires when the pure
-   * {@link shouldShake} policy allows it: it must have real magnitude, be
-   * PERCEIVABLE by the player (the player champion is attacker/victim, or the
-   * hit is inside the camera's visible {@link Phaser.Cameras.Scene2D.Camera.worldView}),
-   * and pass the throttle (no new shake within {@link SHAKE_MIN_INTERVAL_MS}
-   * unless strictly stronger, and never restart a shake weaker than the one
-   * currently playing). This is what keeps off-screen bot fights and rapid hits
-   * from turning the camera into a permanent tremor. `worldPos` is the flat
-   * gameplay-plane position of the hit; we project it into the same screen space
-   * the camera scrolls over to test on-screen. Purely cosmetic.
+   * CAMERA SHAKE IS DISABLED, DELIBERATELY.
+   *
+   * Every shake path used to funnel through here: ability hits above the chip
+   * band, structure destruction, and the ultimate-cast bump. It was throttled
+   * (SHAKE_MIN_INTERVAL_MS), magnitude-capped (MAX_SHAKE_INTENSITY) and gated on
+   * being on-screen, and on that basis it was wrongly ruled out as the cause of
+   * the "shaking" reported in play. It was not: in a 5v5 with turrets trading
+   * constantly, a gentle-but-frequent bump reads exactly like an unstable
+   * camera, and the player asked for it gone outright rather than tuned down.
+   *
+   * The call sites are kept (they still classify hits for flashes, sparks,
+   * knockback and popups) so removing them is a one-line change if a future
+   * pass wants an opt-in screenshake setting instead. The pure policy helpers in
+   * `juice.ts` (`shakeForHit`, `shouldShake`, `structureDestructionShake`) are
+   * likewise left intact and unit-tested; nothing calls them into the camera.
    */
-  private tryShake(spec: ShakeSpec, worldPos: Vec2, involvesPlayer: boolean) {
-    if (this.reducedMotion || spec.intensity <= 0 || spec.duration <= 0) return;
-    const cam = this.cameras.main;
-    const screen = project(worldPos);
-    const onScreen = cam.worldView.contains(screen.x, screen.y);
-    const effect = cam.shakeEffect;
-    const running = effect.isRunning;
-    // Shake.intensity is a Vector2 (per-axis); we drive both axes equally so x
-    // is representative of the currently-playing magnitude.
-    const runningIntensity = running ? effect.intensity.x : 0;
-    if (
-      !shouldShake({
-        intensity: spec.intensity,
-        involvesPlayer,
-        onScreen,
-        sinceLastMs: this.time.now - this.lastShakeAt,
-        running,
-        runningIntensity,
-      })
-    ) {
-      return;
-    }
-    this.shake(spec.intensity, spec.duration);
+  private tryShake(_spec: ShakeSpec, _worldPos: Vec2, _involvesPlayer: boolean) {
+    // Intentionally empty - see the note above. Hit FLASH, spark, knockback and
+    // damage popups all still fire; only the camera is left still.
   }
 
   /**
@@ -3768,9 +4007,14 @@ export default class BattleScene extends Phaser.Scene {
     displayH?: number,
   ): Phaser.GameObjects.Image | null {
     if (!this.canAllocateTransient()) return null;
-    const { key, size } = this.sprites.ensureVfx(kind, color);
+    // VFX come from a WHITE pixel sheet and are TINTED with the ability colour,
+    // so one sheet per kind covers every colour instead of baking a texture per
+    // (kind x colour) pair the way the old SVG rasterizer had to.
+    const key = vfxSheetKey(kind);
+    const size = VFX_FRAME;
     const img = this.registerTransient(this.add.image(x, y, key));
     if (!img) return null;
+    img.setTint(color);
     img.setOrigin(0.5, 0.5);
     img.setDisplaySize(displayW, displayH ?? displayW * (size.height / size.width));
     img.setDepth(VFX_DEPTH);

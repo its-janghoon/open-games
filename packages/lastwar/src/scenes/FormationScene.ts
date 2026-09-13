@@ -185,7 +185,12 @@ export class FormationScene extends Phaser.Scene {
 
     const container = this.add.container(x, y, [bg, portrait, frame, name]);
     container.setSize(58, 58);
-    container.setInteractive(new Phaser.Geom.Rectangle(-29, -29, 58, 58), Phaser.Geom.Rectangle.Contains);
+    // setSize-derived hit box, NOT an explicit centred Geom.Rectangle:
+    // pointWithinHitArea already normalizes the pointer by displayOrigin, so
+    // `Rectangle(-29, -29, 58, 58)` double-applies the half-size shift and the
+    // card only responds 29px up and left of where it is drawn - which also
+    // makes the drag grab feel like it misses.
+    container.setInteractive({ useHandCursor: true });
     this.input.setDraggable(container);
 
     const home = { x, y };

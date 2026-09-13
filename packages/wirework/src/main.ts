@@ -68,8 +68,21 @@ const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#0b0f14',
-  pixelArt: true,
-  roundPixels: true,
+  // Do NOT set `pixelArt: true`. It forces `antialias: false`, which makes
+  // EVERY texture sample with NEAREST - including the Phaser Text glyph
+  // textures, which are NOT exempt (see TextureSource: the default scaleMode
+  // comes straight from `game.config.antialias`). Text is rasterized at
+  // TEXT_RESOLUTION (>=3x) and then drawn at the fractional camera zoom, so
+  // NEAREST *minification* drops whole texel rows and shreds small glyphs -
+  // Hangul suffers worst because jongseong stack 2-3 strokes into a few
+  // pixels and merge into blobs. Scaling SMOOTHLY instead turns that same 3x
+  // texture into supersampled, sharp text. Pixel-art crispness is restored
+  // per-texture in PreloadScene.applyPixelArtFiltering(), not globally.
+  //
+  // roundPixels MUST stay false: the camera zoom is fractional (fill scale),
+  // and snapping draw positions to integers shifts centred labels off-centre
+  // by up to half a logical pixel. champs and lastwar document the same trap.
+  render: { antialias: true, roundPixels: false },
   scale: {
     // FIT of an ASPECT-MATCHED surface (fillWidth x fillHeight) fills a portrait
     // phone with no thin-band letterbox; the 960x540 layout is centered inside

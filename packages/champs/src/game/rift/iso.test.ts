@@ -49,15 +49,14 @@ describe('projection constants', () => {
     expect(HEIGHT_SCALE).toBeGreaterThan(0);
   });
 
-  it('fits X and Y independently so the diamond fills the view both ways', () => {
+  it('fits X and Y independently so the world fills the view both ways', () => {
     const { sx, sy } = projectionScale();
-    // The raw diamond is 2W wide but only W tall, so filling both axes needs a
-    // larger vertical scale than horizontal (this is what removes the big
-    // top/bottom dead margins of the old uniform fit).
+    // The axis-aligned world projects W wide but only W/2 tall, so filling both
+    // axes still needs a larger vertical scale than horizontal.
     expect(sy).toBeGreaterThan(sx);
     // Each axis fills exactly to its usable span (view minus 2*margin).
-    expect(sx).toBeCloseTo((VIEW_W - MARGIN * 2) / (WORLD_SIZE * 2), 6);
-    expect(sy).toBeCloseTo((VIEW_H - MARGIN * 2) / WORLD_SIZE, 6);
+    expect(sx).toBeCloseTo((VIEW_W - MARGIN * 2) / WORLD_SIZE, 6);
+    expect(sy).toBeCloseTo((VIEW_H - MARGIN * 2) / (WORLD_SIZE / 2), 6);
   });
 });
 
@@ -68,43 +67,41 @@ describe('worldToScreen corner + centre mapping', () => {
     expect(s.y).toBeCloseTo(VIEW_H / 2, 6);
   });
 
-  it('maps the four world corners to the four diamond tips', () => {
+  it('maps the four world corners to the four view corners, minimap-aligned', () => {
     const tl = worldToScreen(CORNERS.topLeft);
     const tr = worldToScreen(CORNERS.topRight);
     const bl = worldToScreen(CORNERS.bottomLeft);
     const br = worldToScreen(CORNERS.bottomRight);
 
-    // top-left world -> TOP tip (smallest screen y, centred horizontally).
-    expect(tl.x).toBeCloseTo(VIEW_W / 2, 6);
-    // bottom-right world -> BOTTOM tip (largest screen y, centred horizontally).
-    expect(br.x).toBeCloseTo(VIEW_W / 2, 6);
-    // bottom-left world -> LEFT tip (smallest screen x, vertically centred).
-    expect(bl.y).toBeCloseTo(VIEW_H / 2, 6);
-    // top-right world -> RIGHT tip (largest screen x, vertically centred).
-    expect(tr.y).toBeCloseTo(VIEW_H / 2, 6);
+    // The projection is AXIS-ALIGNED (no 45-degree rotation), so world x maps to
+    // screen x and world y maps to screen y - the same orientation the minimap
+    // plots its blips in (`left: x%`, `top: y%`). Corners stay corners.
+    expect(tl.x).toBeCloseTo(bl.x, 6);   // left edge shares one screen x
+    expect(tr.x).toBeCloseTo(br.x, 6);   // right edge shares one screen x
+    expect(tl.y).toBeCloseTo(tr.y, 6);   // top edge shares one screen y
+    expect(bl.y).toBeCloseTo(br.y, 6);   // bottom edge shares one screen y
 
-    // Ordering of the tips around the diamond.
-    expect(tl.y).toBeLessThan(br.y);
-    expect(bl.x).toBeLessThan(tr.x);
-    expect(bl.x).toBeLessThan(tl.x);
-    expect(tr.x).toBeGreaterThan(br.x);
+    // Left is left, top is top.
+    expect(tl.x).toBeLessThan(tr.x);
+    expect(tl.y).toBeLessThan(bl.y);
   });
 
-  it('keeps the ally base toward the lower-left of the diamond', () => {
+  it('puts the ally base at the LOWER-LEFT, matching the minimap', () => {
     const ally = worldToScreen(BASE_POSITIONS.ally);
     const enemy = worldToScreen(BASE_POSITIONS.enemy);
     const center = worldToScreen(CENTER);
-    // Ally base (bottom-left world) reads to the LEFT of centre - the lower-left
-    // side of the diamond - matching the top-down orientation. It sits on the
-    // world anti-diagonal so it projects at the diamond's vertical mid-line.
+    // Ally base is bottom-left in WORLD space, and now reads bottom-left on
+    // SCREEN too. Under the old rotated projection it landed at the vertical
+    // mid-line (left-centre) while the minimap showed it bottom-left, which is
+    // the mismatch this projection change fixes.
     expect(ally.x).toBeLessThan(center.x);
-    expect(ally.y).toBeCloseTo(center.y, 6);
-    // Enemy base (top-right world) mirrors it to the RIGHT of centre.
+    expect(ally.y).toBeGreaterThan(center.y);
+    // Enemy base (top-right world) mirrors it to the upper-right.
     expect(enemy.x).toBeGreaterThan(center.x);
-    expect(enemy.y).toBeCloseTo(center.y, 6);
-    // Ally and enemy bases are horizontally mirrored about the view centre.
-    expect(ally.x).toBeLessThan(enemy.x);
+    expect(enemy.y).toBeLessThan(center.y);
+    // The two bases are point-mirrored about the view centre.
     expect(center.x - ally.x).toBeCloseTo(enemy.x - center.x, 6);
+    expect(ally.y - center.y).toBeCloseTo(center.y - enemy.y, 6);
   });
 });
 

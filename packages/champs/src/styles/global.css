@@ -1024,23 +1024,17 @@ body {
 
 .battle-stage {
   position: relative;
-  /* The stage keeps its 900/640 aspect ratio but is bounded by BOTH the
-     available width AND the available height so it always fits the viewport
-     with no page scroll while staying as large as possible.
-       - width  = min(100% of the row, 900px, and the width implied by the
-                  height cap) via `max-width` + the height-driven aspect ratio.
-       - height = min(available flex height, 640px, and the height implied by
-                  the width cap).
-     `flex: 1 1 auto` + `min-height:0` hand the stage the leftover height after
-     the surrender button; `aspect-ratio` then keeps it 900:640. The two
-     `max-*` caps stop it exceeding its native size on very tall/wide viewports. */
+  /* The stage FILLS the row it is given. It used to cap itself at the canvas's
+     native 900x640 with a fixed `aspect-ratio`, so on a wide desktop the game
+     sat as a small island with large dead margins either side. The Phaser
+     surface is now aspect-matched to this box (see `surfaceFor` in
+     PhaserGame.tsx), so Scale.FIT fills whatever size the box takes and there
+     is nothing left to letterbox. `flex: 1 1 auto` + `min-height: 0` still hand
+     the stage the leftover height after the surrender button. */
   flex: 1 1 auto;
   min-height: 0;
-  width: auto;
-  height: auto;
-  max-width: 900px;
-  max-height: 640px;
-  aspect-ratio: 900 / 640;
+  width: 100%;
+  height: 100%;
   /* No outer frame: the stage blends into the viewport instead of sitting in a
      bordered/boxed shell. Corners are still clipped so the canvas stays tidy. */
   border-radius: 6px;
@@ -1692,7 +1686,9 @@ body {
 }
 
 @media (max-width: 480px) {
-  .champion-select__roster {
+  /* Was `.champion-select__roster`, a selector no element carries - the roster
+     container's class is `__cards`, so this rule silently did nothing. */
+  .champion-select__cards {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   }
 
@@ -2433,13 +2429,23 @@ select {
 
 .champion-select__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  /*
+   * All TEN champions on ONE row.
+   *
+   * `repeat(auto-fit, minmax(108px, 1fr))` inside the old `min(100%, 1040px)`
+   * cap resolved to EIGHT columns, so the last two champions wrapped onto a
+   * second row that `.champion-select__main`'s `overflow: hidden` then clipped
+   * outright - two of the ten were simply not visible, and the selected card's
+   * taller frame broke the row baseline on top of that. A fixed ten-track grid
+   * with a wider cap keeps the whole roster on screen and reclaims some of the
+   * dead horizontal space either side of the old 1040px column.
+   */
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   align-items: center;
-  width: min(100%, 1040px);
+  width: min(100%, 1480px);
   margin-inline: auto;
-  gap: clamp(0.55rem, 1.2vw, 1rem);
+  gap: clamp(0.35rem, 0.7vw, 0.7rem);
   padding: 1.2rem 0 0.8rem;
-  flex-wrap: wrap;
 }
 
 .lobby-card {
@@ -2989,12 +2995,18 @@ select {
 
 .battle-stage {
   container-type: inline-size;
-  flex: 0 1 auto;
-  width: auto;
-  height: min(640px, calc(100% - 3.5rem));
-  max-width: 100%;
-  max-height: 640px;
-  aspect-ratio: 900 / 640;
+  /*
+   * FILL the available area. This used to be `height: min(640px, ...)`,
+   * `max-width: 100%`, `max-height: 640px` and a fixed `aspect-ratio: 900/640`,
+   * which pinned the stage to the canvas's native 900x640 and left the game as
+   * a small island in the middle of a wide desktop viewport. The surface is now
+   * aspect-matched to this box in PhaserGame (`surfaceFor`), so letting the box
+   * fill the row makes FIT fill it exactly - no letterbox band, no upscale blur.
+   */
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   border: 1px solid rgba(217, 184, 108, 0.28);
   border-radius: var(--radius-md);
   background:
@@ -3459,12 +3471,18 @@ select {
 }
 
 .battle-stage {
-  flex: none;
-  width: min(900px, 100cqw, calc(100cqh * 900 / 640));
-  height: auto;
+  /* FILL the slot. This was `flex: none` + `width: min(900px, 100cqw,
+     calc(100cqh * 900 / 640))` + `aspect-ratio: 900/640`, the last and
+     strongest of the three caps that pinned the game to a 900x640 island on a
+     wide desktop (measured 47% viewport width fill against every sibling
+     game's 100%). The Phaser surface is aspect-matched to this box now, so
+     filling the slot is what makes Scale.FIT fill the screen. */
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
   max-width: none;
   max-height: none;
-  aspect-ratio: 900 / 640;
+  aspect-ratio: auto;
 }
 
 .battle-stage__loading {

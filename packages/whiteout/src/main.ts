@@ -89,12 +89,19 @@ const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: PALETTE.BG_SKY_CSS,
-  // pixelArt keeps the global texture filter at NEAREST so building/enemy/troop
-  // SPRITES stay crisp pixel-art (no bilinear smoothing). It does NOT make text
-  // blurry any more, because the backbuffer below is rendered at device pixels
-  // rather than being nearest-neighbour-upscaled from a low-res 960x540 buffer.
-  pixelArt: true,
-  roundPixels: true,
+  // Do NOT set `pixelArt: true`. It forces `antialias: false`, i.e. NEAREST on
+  // EVERY texture - and Phaser Text is not exempt, because TextureSource takes
+  // its default scaleMode straight from `game.config.antialias`. A device-pixel
+  // backbuffer stops text being *blurry*, but it does not stop this: glyphs are
+  // rasterized at TEXT_RESOLUTION (>=3x) and then NEAREST-minified to their
+  // drawn size, which point-samples whole texel rows away. Hangul jongseong
+  // merge into blobs. Scaling smoothly makes that oversized texture a
+  // supersampled downscale, and pixel art stays crisp per-texture via
+  // PreloadScene.applyPixelArtFiltering().
+  //
+  // roundPixels stays false: the camera zoom is fractional, and snapping draw
+  // positions to integers pushes centred labels off-centre.
+  render: { antialias: true, roundPixels: false },
   scale: {
     // FIT of an ASPECT-MATCHED game surface: because the game width/height now
     // matches the viewport aspect (fillWidth x fillHeight, see resolveViewportPlan),
