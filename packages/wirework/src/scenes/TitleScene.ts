@@ -44,8 +44,9 @@ export class TitleScene extends Phaser.Scene {
       .tileSprite(0, 0, CANVAS.WIDTH, CANVAS.HEIGHT, TextureKeys.BgHills)
       .setOrigin(0, 0)
       .setAlpha(0.92);
-    // The wall image stays centered on the design band but is scaled to cover
-    // the full visible width so it never leaves a bare strip on the sides.
+    // A right-edge wall slab sized to the design band (see refitBackdrop for why
+    // it must NOT be stretched to the visible width). The side margins of a wide
+    // viewport are covered by the tiling sky/hills above, not by this.
     this.bgWall = this.add.image(cx, CANVAS.HEIGHT / 2, TextureKeys.BgWall).setAlpha(0.85);
     onViewportRefit(this, { width: CANVAS.WIDTH, height: CANVAS.HEIGHT }, (rect) => this.refitBackdrop(rect));
 
@@ -90,7 +91,17 @@ export class TitleScene extends Phaser.Scene {
   private refitBackdrop(rect: VisibleWorldRect): void {
     this.bgSky.setPosition(rect.x, rect.y).setSize(rect.width, rect.height);
     this.bgHills.setPosition(rect.x, rect.y).setSize(rect.width, rect.height);
-    this.bgWall.setPosition(CANVAS.WIDTH / 2, CANVAS.HEIGHT / 2).setDisplaySize(rect.width, CANVAS.HEIGHT);
+    // The wall is pinned to the DESIGN BAND, not stretched to rect.width.
+    // wall.png is 480x270 whose left 75% is fully transparent - it is a
+    // right-edge wall slab, not a full-width texture like sky/hills (which are
+    // tileSprites and genuinely do tile to cover the margins). Stretching it
+    // horizontally therefore did not fill a bare strip; it just widened the
+    // slab in proportion to the viewport, painting a hard-edged grey column
+    // over the right of the screen and the language selector with it. At the
+    // band size the source lands at exactly 2x (960/480 == 540/270), so this is
+    // both aspect-preserving and stable: the slab stays at logical x 780..960,
+    // under the hero that create() perches on it.
+    this.bgWall.setPosition(CANVAS.WIDTH / 2, CANVAS.HEIGHT / 2).setDisplaySize(CANVAS.WIDTH, CANVAS.HEIGHT);
   }
 
   update(_time: number, delta: number): void {
