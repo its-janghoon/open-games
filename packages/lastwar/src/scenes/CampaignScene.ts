@@ -172,7 +172,10 @@ export class CampaignScene extends Phaser.Scene {
     const store = GameStore.get();
     const cx = CANVAS.WIDTH / 2;
     const y = CANVAS.HEIGHT * 0.34;
-    Menu.panel(this, cx, y + 6, CANVAS.WIDTH - 48, 96, 0.9).setStrokeStyle(2, PALETTE.BOSS);
+    // Height 140, not 96: the action row at y + 52 is at least 44px tall
+    // (Menu.button's touch-target floor), so a 96-tall panel left 20px of both
+    // buttons hanging below the frame.
+    Menu.panel(this, cx, y + 6, CANVAS.WIDTH - 48, 140, 0.9).setStrokeStyle(2, PALETTE.BOSS);
 
     Menu.title(this, cx, y - 24, tr('zombie.title'), 20).setColor(PALETTE.BOSS_CSS);
     const nextWave = store.highestZombieWave() + 1;

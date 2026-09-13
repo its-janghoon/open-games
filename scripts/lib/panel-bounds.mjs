@@ -25,6 +25,16 @@ import { join } from 'node:path';
 /** Button height floor from Menu.button: h = Math.max(44, ...). */
 const MIN_BUTTON_H = 44;
 
+/** Offset of the innermost `{` still open at `index`, identifying its block. */
+function blockAt(body, index) {
+  const stack = [];
+  for (let i = 0; i < index && i < body.length; i += 1) {
+    if (body[i] === '{') stack.push(i);
+    else if (body[i] === '}') stack.pop();
+  }
+  return stack.length ? stack[stack.length - 1] : -1;
+}
+
 /** Evaluate a tiny arithmetic expression against a scope of known numbers. */
 export function evalExpr(src, scope) {
   const text = String(src).trim();
@@ -146,6 +156,7 @@ export function analyzeSource(source, { file, canvas }) {
   };
   delete base.Math;
   const violations = [];
+  const overlaps = [];
   const skipped = [];
   let panels = 0;
 
@@ -164,6 +175,7 @@ export function analyzeSource(source, { file, canvas }) {
     }
     panels += 1;
     const panel = { left: cx - w / 2, right: cx + w / 2, top: cy - h / 2, bottom: cy + h / 2, w, h };
+    const buttons = [];
 
     for (const call of findCalls(fn.body, 'Menu.button')) {
       const [, bxText, byText, labelText, , optsText] = call.args;
@@ -176,6 +188,12 @@ export function analyzeSource(source, { file, canvas }) {
       const optW = optNumber(optsText, 'width', scope);
       const optH = optNumber(optsText, 'height', scope);
       const bh = Math.max(MIN_BUTTON_H, optH ?? MIN_BUTTON_H);
+      buttons.push({
+        label: (labelText || '').trim().slice(0, 40),
+        line: lineOf(source, fn.offset + call.start),
+        block: blockAt(fn.body, call.start),
+        bx, by, w: optW, h: bh,
+      });
       const box = { top: by - bh / 2, bottom: by + bh / 2 };
       const out = {
         top: Math.round(panel.top - box.top),
@@ -216,8 +234,50 @@ export function analyzeSource(source, { file, canvas }) {
         });
       }
     }
+
+    /*
+     * Buttons that collide with EACH OTHER.
+     *
+     * Menu.button enforces h = Math.max(44, ...) for touch targets, so any pair
+     * spaced less than 44px apart vertically now overlaps even though the
+     * hand-written coordinates predate that floor. Using the 44px minimum keeps
+     * this sound: if the smallest possible boxes already intersect, the real
+     * (larger) ones certainly do. Horizontal overlap is only asserted when it is
+     * guaranteed - both widths known and intersecting, or a shared centre x,
+     * which both boxes must contain whatever their widths turn out to be.
+     */
+    for (let i = 0; i < buttons.length; i += 1) {
+      for (let j = i + 1; j < buttons.length; j += 1) {
+        const a = buttons[i];
+        const b = buttons[j];
+        // Buttons in different blocks are usually the arms of an if/else and
+        // never exist at the same time, so pairing them would be a false alarm.
+        if (a.block !== b.block) continue;
+        const dy = Math.min(a.by + a.h / 2, b.by + b.h / 2) - Math.max(a.by - a.h / 2, b.by - b.h / 2);
+        if (dy <= 0) continue;
+        let xOverlaps;
+        if (a.w !== null && b.w !== null) {
+          xOverlaps = Math.min(a.bx + a.w / 2, b.bx + b.w / 2) - Math.max(a.bx - a.w / 2, b.bx - b.w / 2) > 0;
+        } else if (a.bx === b.bx) {
+          xOverlaps = true;
+        } else {
+          continue; // width unknown and centres differ - cannot prove it
+        }
+        if (!xOverlaps) continue;
+        overlaps.push({
+          file,
+          fn: fn.name,
+          line: Math.min(a.line, b.line),
+          pair: [a.label, b.label],
+          centres: [[a.bx, a.by], [b.bx, b.by]],
+          gapPx: Math.round(Math.abs(a.by - b.by)),
+          minHeights: [a.h, b.h],
+          overlapPx: Math.round(dy),
+        });
+      }
+    }
   }
-  return { violations, skipped, panels };
+  return { violations, overlaps, skipped, panels };
 }
 
 function walk(dir, out = []) {
@@ -244,7 +304,7 @@ export function canvasFor(packageDir) {
 /** Analyse a whole package directory. */
 export function analyzePackage(packageDir) {
   const canvas = canvasFor(packageDir);
-  const result = { violations: [], skipped: [], panels: 0, canvas };
+  const result = { violations: [], overlaps: [], skipped: [], panels: 0, canvas };
   let files = [];
   try {
     files = walk(join(packageDir, 'src'));
@@ -256,9 +316,11 @@ export function analyzePackage(packageDir) {
     if (!source.includes('Menu.panel(')) continue;
     const one = analyzeSource(source, { file, canvas });
     result.violations.push(...one.violations);
+    result.overlaps.push(...one.overlaps);
     result.skipped.push(...one.skipped);
     result.panels += one.panels;
   }
   result.violations.sort((a, b) => b.worstPx - a.worstPx);
+  result.overlaps.sort((a, b) => b.overlapPx - a.overlapPx);
   return result;
 }

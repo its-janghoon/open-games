@@ -18,6 +18,7 @@ const games = loadListedGames();
 const report = [];
 let confirmed = 0;
 let suspect = 0;
+let overlapCount = 0;
 let panels = 0;
 
 for (const game of games) {
@@ -25,6 +26,7 @@ for (const game of games) {
   panels += result.panels;
   confirmed += result.violations.filter((v) => v.confidence === 'confirmed').length;
   suspect += result.violations.filter((v) => v.confidence === 'suspect').length;
+  overlapCount += result.overlaps.length;
   report.push({ slug: game.slug, ...result });
 }
 
@@ -54,6 +56,15 @@ if (asJson) {
     console.log(`\n[panels] ${entry.slug}: ${entry.panels} panel(s), ${n} finding(s)`);
     show(entry, 'confirmed');
     show(entry, 'suspect');
+    if (entry.overlaps.length) {
+      console.log('  OVERLAPPING BUTTONS (Menu.button enforces a 44px height floor):');
+      for (const o of entry.overlaps) {
+        const rel = o.file.replace(/^.*\/packages\//, 'packages/');
+        console.log(`    ${rel}:${o.line}  ${o.fn}()  ${o.pair.join('  <>  ')}`);
+        console.log(`        centres ${o.gapPx}px apart but each is >=${Math.max(...o.minHeights)}px tall`
+          + ` -> overlap ${o.overlapPx}px`);
+      }
+    }
     if (entry.skipped.length) {
       console.log(`    (${entry.skipped.length} construct(s) unresolvable, not counted)`);
     }
@@ -61,6 +72,7 @@ if (asJson) {
   console.log(`\n[panels] ${panels} panel(s) analysed`);
   console.log(`[panels] ${confirmed} CONFIRMED (button centre inside its panel, extent spills out)`);
   console.log(`[panels] ${suspect} suspect (centre outside the panel - probably a separate element)`);
+  console.log(`[panels] ${overlapCount} overlapping button pair(s)`);
 }
 
 /* --- baseline comparison: fail on NEW violations, and on stale entries --- */
@@ -74,6 +86,11 @@ for (const entry of report) {
     if (v.confidence !== 'confirmed') continue;
     const rel = String(v.file).replace(/^.*\/packages\/[^/]+\//, '');
     const key = `${entry.slug}/${rel}#${v.fn}`;
+    actual[key] = (actual[key] ?? 0) + 1;
+  }
+  for (const o of entry.overlaps) {
+    const rel = String(o.file).replace(/^.*\/packages\/[^/]+\//, '');
+    const key = `${entry.slug}/${rel}#${o.fn}:overlap`;
     actual[key] = (actual[key] ?? 0) + 1;
   }
 }

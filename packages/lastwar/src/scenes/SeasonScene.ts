@@ -158,7 +158,10 @@ export class SeasonScene extends Phaser.Scene {
         .setOrigin(0.5),
     );
 
-    const btn = Menu.button(this, cx, y + 54, tr('season.resistanceUp'), () => this.raiseResistance(), {
+    // y + 46, not y + 54: the panel is 128 tall centred on y + 8, so it ends at
+    // y + 72; a 44px button (Menu.button's touch-target floor) centred at y + 54
+    // reached y + 76 and hung 4px below the frame.
+    const btn = Menu.button(this, cx, y + 46, tr('season.resistanceUp'), () => this.raiseResistance(), {
       width: 220,
       accent: PALETTE.BOSS,
       fontSize: 15,

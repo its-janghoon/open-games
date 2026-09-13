@@ -481,7 +481,11 @@ export class TownScene extends Phaser.Scene {
 
   private buildUpgradePanel(): void {
     const w = 300;
-    const h = 300;
+    // 350, not 300: the progress bar sits at y + 66 and the two buttons below it
+    // are each at least 44px tall (Menu.button's touch-target floor), which does
+    // not fit in 300 - the close button used to hang outside the frame and
+    // overlap the upgrade button by 10px.
+    const h = 350;
     const x = CANVAS.WIDTH - w / 2 - 20;
     const y = CANVAS.HEIGHT / 2 - 10;
     this.upgradePanel = this.add.container(0, 0).setDepth(30).setVisible(false);
@@ -505,10 +509,14 @@ export class TownScene extends Phaser.Scene {
     this.upgradeProgress = Menu.progressBar(this, left, y + 66, w - 44, 12, PALETTE.SUCCESS);
     this.upgradeProgress.container.setVisible(false);
 
-    this.upgradeButton = Menu.button(this, x, y + h / 2 - 54, tr('building.upgrade'), () => this.doUpgrade(), {
+    this.upgradeButton = Menu.button(this, x, y + h / 2 - 78, tr('building.upgrade'), () => this.doUpgrade(), {
       width: w - 60,
     });
-    const close = Menu.button(this, x, y + h / 2 - 20, tr('common.close'), () => this.closeUpgradePanel(), {
+    // 50px below the upgrade button, not 34: Menu.button enforces a 44px height
+    // floor for touch targets, so anything tighter than that overlaps its
+    // neighbour no matter what the coordinates say. The panel was grown to 350
+    // to fit both buttons under the progress bar at y + 66.
+    const close = Menu.button(this, x, y + h / 2 - 28, tr('common.close'), () => this.closeUpgradePanel(), {
       width: w - 60,
       fontSize: 15,
     });
@@ -659,7 +667,11 @@ export class TownScene extends Phaser.Scene {
     this.battlePanel = this.add.container(0, 0).setDepth(70).setVisible(false);
     const dim = this.add.rectangle(0, 0, CANVAS.WIDTH, CANVAS.HEIGHT, 0x000000, 0.6).setOrigin(0, 0).setInteractive();
     dim.on(Phaser.Input.Events.POINTER_DOWN, () => this.closeBattlePanel());
-    const panel = Menu.panel(this, cx, CANVAS.HEIGHT / 2, 620, 410);
+    // Height 460, not 410: the action row sits at y=425 and the close button
+    // below it needs a full 44px (Menu.button's touch-target floor) plus a gap,
+    // which a 410-tall panel (y 65..475) could not give - the close button was
+    // centred exactly on the panel's bottom edge and hung 22px outside it.
+    const panel = Menu.panel(this, cx, CANVAS.HEIGHT / 2, 620, 460);
     panel.setInteractive();
     const title = Menu.title(this, cx, 88, tr('battle.preflightTitle'), 28);
     this.battleDetails = this.add.text(cx, 130, '', textStyle(14, { align: 'left', wordWrap: { width: 550 } })).setOrigin(0.5, 0);
@@ -671,7 +683,7 @@ export class TownScene extends Phaser.Scene {
       this.openTraining();
     }, { width: 180, height: 44 });
     this.battleConfirm = Menu.button(this, cx + 110, 425, tr('battle.confirmDeploy'), () => this.confirmBattle(), { width: 240, height: 44, accent: PALETTE.DANGER });
-    const close = Menu.button(this, cx, 475, tr('common.close'), () => this.closeBattlePanel(), { width: 180, height: 44 });
+    const close = Menu.button(this, cx, 470, tr('common.close'), () => this.closeBattlePanel(), { width: 180, height: 44 });
     this.battlePanel.add([dim, panel, title, this.battleDetails, this.battleStatus, previous.container, next.container, trainShortcut.container, this.battleConfirm.container, close.container]);
   }
 
