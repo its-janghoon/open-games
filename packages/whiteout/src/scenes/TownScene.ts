@@ -615,7 +615,11 @@ export class TownScene extends Phaser.Scene {
 
   private buildUpgradePanel(): void {
     const w = 300;
-    const h = 300;
+    // 350, not 300: the progress bar sits at y + 66 and the two buttons below it
+    // are each at least 44px tall (Menu.button's touch-target floor), which does
+    // not fit in 300 - the close button used to hang outside the frame and
+    // overlap the upgrade button by 10px.
+    const h = 350;
     const x = CANVAS.WIDTH - w / 2 - 20;
     const y = CANVAS.HEIGHT / 2 - 10;
     this.upgradePanel = this.add.container(0, 0).setDepth(30).setVisible(false);
@@ -639,10 +643,14 @@ export class TownScene extends Phaser.Scene {
     this.upgradeProgress = Menu.progressBar(this, left, y + 66, w - 44, 12, PALETTE.SUCCESS);
     this.upgradeProgress.container.setVisible(false);
 
-    this.upgradeButton = Menu.button(this, x, y + h / 2 - 54, tr('building.upgrade'), () => this.doUpgrade(), {
+    this.upgradeButton = Menu.button(this, x, y + h / 2 - 78, tr('building.upgrade'), () => this.doUpgrade(), {
       width: w - 60,
     });
-    const close = Menu.button(this, x, y + h / 2 - 20, tr('common.close'), () => this.closeUpgradePanel(), {
+    // 50px below the upgrade button, not 34: Menu.button enforces a 44px height
+    // floor for touch targets, so anything tighter than that overlaps its
+    // neighbour no matter what the coordinates say. The panel was grown to 350
+    // to fit both buttons under the progress bar at y + 66.
+    const close = Menu.button(this, x, y + h / 2 - 28, tr('common.close'), () => this.closeUpgradePanel(), {
       width: w - 60,
       fontSize: 15,
     });
@@ -851,10 +859,12 @@ export class TownScene extends Phaser.Scene {
         });
       }
     };
-    // Dismiss button centred at cy + h/2 - 12 = 270 + 88 - 12 = 346 so it lines
-    // up with the screenshot harness's dismiss click at logical (480, 346);
-    // keep this in sync with tools/capture_screenshots.mjs.
-    const ok = Menu.button(this, cx, cy + h / 2 - 12, tr('town.welcomeStart'), dismiss, { width: 200 });
+    // Centred at cy + h/2 - 30 = 328, so its 44px touch target spans 306..350 and
+    // sits fully inside the card (which ends at 358). It used to be at -12 = 346,
+    // centred so low that 10px of the button hung outside the frame.
+    // The screenshot harness's dismiss click at logical (480, 346) still lands
+    // inside that span; keep this in sync with tools/capture_screenshots.mjs.
+    const ok = Menu.button(this, cx, cy + h / 2 - 30, tr('town.welcomeStart'), dismiss, { width: 200 });
 
     card.add([panel, title, body, ok.container]);
     modal.focusFirst();

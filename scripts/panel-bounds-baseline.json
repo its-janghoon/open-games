@@ -1,0 +1,11 @@
+{
+  "_comment": [
+    "Buttons proven to hang outside their panel, or to overlap another button in",
+    "the same block. EMPTY = clean: every entry that was here has been fixed.",
+    "scripts/check-panel-bounds.mjs fails when a key appears that is not listed,",
+    "AND when a listed count is higher than reality, so this file cannot silently",
+    "rot in either direction. Do not add an entry to make a build pass - fix the",
+    "coordinates, or grow the panel.",
+    "Key format: <game slug>/<path within package>#<function>[:overlap]"
+  ]
+}
