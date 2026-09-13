@@ -57,6 +57,10 @@ export class WarmthSystem {
    * Fuel burn per second (wood + coal) at the given Furnace level. Base demand
    * is reduced by FUEL_EFFICIENCY_PER_LEVEL per level above 1, floored at
    * FUEL_MIN_FACTOR of the base so fuel never becomes irrelevant.
+   *
+   * Coal is only demanded from WARMTH.COAL_FROM_FURNACE_LEVEL upward, which is
+   * the level that unlocks the Coal Pit. A Furnace that demanded a resource the
+   * hold had no way to produce could strand a run permanently.
    */
   fuelPerSecond(furnaceLevel: number): { wood: number; coal: number } {
     const levelsAbove = Math.max(0, furnaceLevel - 1);
@@ -64,17 +68,19 @@ export class WarmthSystem {
       WARMTH.FUEL_MIN_FACTOR,
       1 - WARMTH.FUEL_EFFICIENCY_PER_LEVEL * levelsAbove,
     );
+    const burnsCoal = furnaceLevel >= WARMTH.COAL_FROM_FURNACE_LEVEL;
     return {
       wood: WARMTH.FUEL_PER_SECOND.wood * factor,
-      coal: WARMTH.FUEL_PER_SECOND.coal * factor,
+      coal: burnsCoal ? WARMTH.FUEL_PER_SECOND.coal * factor : 0,
     };
   }
 
   /**
    * Advance warmth by `deltaMs`, burning fuel from `store` at the current
-   * Furnace level. If the store can pay the whole fuel demand for the elapsed
-   * time, it is spent and warmth rises; otherwise nothing is spent and warmth
-   * decays. Warmth is clamped to [0, maxWarmth(furnaceLevel)]. Returns UI info.
+   * Furnace level. The affordable SHARE of the demand is spent and warmth moves
+   * by that share, so a partial payment yields partial warmth rather than none.
+   * `fueled` reports whether the whole demand was met. Warmth is clamped to
+   * [0, maxWarmth(furnaceLevel)].
    */
   tick(deltaMs: number, furnaceLevel: number, store: ResourceStore): WarmthTickResult {
     const max = this.maxWarmth(furnaceLevel);
@@ -88,14 +94,39 @@ export class WarmthSystem {
     const perSec = this.fuelPerSecond(furnaceLevel);
     const demand = { wood: perSec.wood * seconds, coal: perSec.coal * seconds };
 
-    // Atomic: only burn if the whole demand is affordable, so partial fueling
-    // never leaves warmth in an ambiguous state.
-    const fueled = store.spend(demand);
-    const fuelSpent = fueled ? { ...demand } : { wood: 0, coal: 0 };
+    // Burn PROPORTIONALLY, not all-or-nothing. The atomic version spent nothing
+    // whenever it could not pay the whole demand, so being one unit short of any
+    // fuel flipped warmth from +GAIN to -DECAY with nothing in between - and
+    // since warmth throttles production, that cliff was unrecoverable rather
+    // than merely painful.
+    //
+    // The share is weighted BY DEMAND across fuels rather than taken as the
+    // worst ratio: burning timber alone still produces heat, so a hold that has
+    // plenty of wood and no coal should hold part of its warmth instead of
+    // freezing outright. Taking the minimum would have reproduced the same cliff
+    // in a new shape - one empty fuel zeroing a burn the hold could otherwise
+    // afford - and would leave an already-stranded save unable to recover.
+    const fuels = ['wood', 'coal'] as const;
+    const totalDemand = fuels.reduce((sum, res) => sum + demand[res], 0);
+    const fuelSpent = { wood: 0, coal: 0 };
+    let share = 1;
+    if (totalDemand > 0) {
+      let paid = 0;
+      for (const res of fuels) {
+        const need = demand[res];
+        if (need <= 0) continue;
+        const got = Math.min(need, store.get(res));
+        fuelSpent[res] = got;
+        paid += got;
+      }
+      share = Math.max(0, Math.min(1, paid / totalDemand));
+      if (paid > 0) store.spend(fuelSpent);
+    }
+    const fueled = share >= 1;
 
-    const change = fueled
-      ? WARMTH.WARMTH_GAIN_PER_SEC * seconds
-      : -WARMTH.WARMTH_DECAY_PER_SEC * seconds;
+    const change =
+      share * WARMTH.WARMTH_GAIN_PER_SEC * seconds -
+      (1 - share) * WARMTH.WARMTH_DECAY_PER_SEC * seconds;
     this._warmth = Math.min(max, Math.max(0, this._warmth + change));
 
     return { warmth: this._warmth, fueled, fuelSpent };

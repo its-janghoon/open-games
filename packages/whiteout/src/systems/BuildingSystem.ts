@@ -11,7 +11,7 @@ import {
   upgradeCost,
   upgradeTimeMs,
 } from '../config/BuildingConfig';
-import { REFINERY } from '../config/GameConfig';
+import { REFINERY, WARMTH } from '../config/GameConfig';
 import type { BuildingKind, BuildingState, ResourceCost, Resources } from '../types';
 import { ResourceStore, type ProductionRates } from './ResourceStore';
 
@@ -208,6 +208,11 @@ export class BuildingSystem {
       if (level <= 0 || !def.produces) continue;
       rates[def.produces] += outputPerSec(kind, level);
     }
+    // Survivors forage a trickle of timber even with nothing built. This is the
+    // anti-softlock floor described on WARMTH.BASELINE_FORAGE_WOOD_PER_SEC: both
+    // starter producers cost a resource the Furnace burns, so without it a hold
+    // could strand itself with no affordable action and no income at all.
+    rates.wood += WARMTH.BASELINE_FORAGE_WOOD_PER_SEC;
     return rates;
   }
 

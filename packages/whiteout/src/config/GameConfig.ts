@@ -266,6 +266,35 @@ export const WARMTH = {
    */
   FUEL_PER_SECOND: { wood: 0.6, coal: 0.4 },
   /**
+   * The Furnace level from which COAL joins the fuel mix. Below it the Furnace
+   * burns timber only.
+   *
+   * This exists to break a deadlock, and the number is not free: it must stay
+   * <= the `requiresFurnaceLevel` of the building that PRODUCES coal (the Coal
+   * Pit, currently 2). Before this gate the level-1 Furnace burned coal from the
+   * first second while coal had no producer at all, and the upgrade that unlocks
+   * the producer itself cost coal - so a run spent a finite 100 coal at 0.4/s
+   * with no way to make more, and the fuel spend being all-or-nothing meant the
+   * moment coal hit zero warmth fell to 0, production was throttled to
+   * WARMTH_PRODUCTION_FLOOR, and the hold could never afford the pit. That is a
+   * permanent soft-lock roughly four minutes into every run.
+   */
+  COAL_FROM_FURNACE_LEVEL: 2,
+  /**
+   * Survivors forage this much timber per second with no building at all.
+   *
+   * This is an ANTI-SOFTLOCK FLOOR, not an economy knob. Both starter producers
+   * cost a resource the Furnace also burns - the Sawmill costs coal, the
+   * Hunter's Hut costs timber - so a hold could reach a state with zero timber,
+   * zero coal and no producer, where every affordable action was gone and income
+   * was nil. Nothing in the game could recover that; it was a dead save.
+   *
+   * Kept deliberately tiny: the Sawmill produces 1.6/s, so once anything real is
+   * standing this is rounding error, but it guarantees the cheapest producer is
+   * always eventually affordable.
+   */
+  BASELINE_FORAGE_WOOD_PER_SEC: 0.2,
+  /**
    * Fractional reduction in fuel burn per Furnace level above 1 (e.g. 0.05 =
    * 5% cheaper per level). Clamped so burn never drops below FUEL_MIN_FACTOR of
    * the base, keeping fuel always meaningful.

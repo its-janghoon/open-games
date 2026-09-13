@@ -357,17 +357,25 @@ describe('SaveManager', () => {
     const startCoal = 100_000;
     const resources = new ResourceStore({ food: 0, wood: startWood, coal: startCoal, iron: 0 });
     const buildings = new BuildingSystem([
-      { kind: 'furnace', level: 1, upgradeEndsAt: null },
+      // Level 2: coal only enters the fuel mix from WARMTH.COAL_FROM_FURNACE_LEVEL,
+      // so a level-1 Furnace would burn no coal and there would be no coal
+      // netting left to prove here.
+      { kind: 'furnace', level: WARMTH.COAL_FROM_FURNACE_LEVEL, upgradeEndsAt: null },
       { kind: 'sawmill', level: 1, upgradeEndsAt: null },
       { kind: 'coal_pit', level: 1, upgradeEndsAt: null },
     ]);
     const training = new TrainingQueue(undefined, { trapper: 0, marksman: 0, vanguard: 0 });
+    // Start at the FULL warmth for this Furnace level, not WARMTH.MAX_WARMTH:
+    // the ceiling rises with level, so seeding the level-1 value would leave
+    // warmth climbing for part of the window and throttle production slightly,
+    // breaking this test's premise that efficiency was 1.0 throughout.
+    const fullWarmth = new WarmthSystem().maxWarmth(WARMTH.COAL_FROM_FURNACE_LEVEL);
     // At-cap, fully-staffed workforce -> constant population multiplier we fold
     // into the expected gross production below.
     const population = atCapWorkforce(buildings, { sawmill: 1, coal_pit: 1 });
     const pm = popMult(buildings, population);
     mgr.save(
-      { resources, buildings, training, warmth: new WarmthSystem(WARMTH.MAX_WARMTH), population, premium: new PremiumWallet(), heroes: new HeroRoster(), summon: new SummonSystem(), campaign: new CampaignSystem(), research: new ResearchSystem(), gear: new GearSystem(), rally: new RallySystem(), arena: new ArenaSystem(), alliance: new AllianceSystem(), quests: new QuestSystem(), vip: new VipSystem(), waveCleared: 0, onboarding: freshOnboarding() },
+      { resources, buildings, training, warmth: new WarmthSystem(fullWarmth), population, premium: new PremiumWallet(), heroes: new HeroRoster(), summon: new SummonSystem(), campaign: new CampaignSystem(), research: new ResearchSystem(), gear: new GearSystem(), rally: new RallySystem(), arena: new ArenaSystem(), alliance: new AllianceSystem(), quests: new QuestSystem(), vip: new VipSystem(), waveCleared: 0, onboarding: freshOnboarding() },
       0,
     );
 
@@ -375,14 +383,16 @@ describe('SaveManager', () => {
     const loaded = mgr.load(elapsedSec * 1000);
     expect(loaded.offlineSeconds).toBe(elapsedSec);
     // Stayed fully warm all window (ample fuel), so production ran unthrottled.
-    expect(loaded.snapshot.warmth.warmth).toBe(loaded.snapshot.warmth.maxWarmth(1));
+    expect(loaded.snapshot.warmth.warmth).toBe(
+      loaded.snapshot.warmth.maxWarmth(WARMTH.COAL_FROM_FURNACE_LEVEL),
+    );
 
     const eff = ECONOMY.OFFLINE_EFFICIENCY;
     // Gross production over the window (warmth 1.0, scaled by the population mult).
     const grossWood = outputPerSec('sawmill', 1) * elapsedSec * eff * pm * DAY_ZERO_EVENT_MULTIPLIER;
     const grossCoal = outputPerSec('coal_pit', 1) * elapsedSec * eff * pm * DAY_ZERO_EVENT_MULTIPLIER;
     // Fuel the L1 Furnace burned over the window (per-second demand * seconds).
-    const perSec = new WarmthSystem().fuelPerSecond(1);
+    const perSec = new WarmthSystem().fuelPerSecond(WARMTH.COAL_FROM_FURNACE_LEVEL);
     const burnedWood = perSec.wood * elapsedSec;
     const burnedCoal = perSec.coal * elapsedSec;
     expect(burnedWood).toBeGreaterThan(0);
@@ -413,7 +423,8 @@ describe('SaveManager', () => {
     const startCoal = 100_000;
     const resources = new ResourceStore({ food: 0, wood: startWood, coal: startCoal, iron: 0 });
     const buildings = new BuildingSystem([
-      { kind: 'furnace', level: 1, upgradeEndsAt: null },
+      // Level 2 so the Furnace burns coal as well as timber (see above).
+      { kind: 'furnace', level: WARMTH.COAL_FROM_FURNACE_LEVEL, upgradeEndsAt: null },
       { kind: 'hunters_hut', level: 1, upgradeEndsAt: null },
     ]);
     const training = new TrainingQueue(undefined, { trapper: 0, marksman: 0, vanguard: 0 });
@@ -425,7 +436,7 @@ describe('SaveManager', () => {
     const elapsedSec = 3600;
     const loaded = mgr.load(elapsedSec * 1000);
 
-    const perSec = new WarmthSystem().fuelPerSecond(1);
+    const perSec = new WarmthSystem().fuelPerSecond(WARMTH.COAL_FROM_FURNACE_LEVEL);
     expect(loaded.offlineGains.wood).toBeCloseTo(-perSec.wood * elapsedSec, 4);
     expect(loaded.offlineGains.coal).toBeCloseTo(-perSec.coal * elapsedSec, 4);
     expect(loaded.offlineGains.wood).toBeLessThan(0);

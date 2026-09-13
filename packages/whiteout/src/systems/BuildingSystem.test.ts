@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BuildingSystem } from './BuildingSystem';
 import { ResourceStore } from './ResourceStore';
+import { WARMTH } from '../config/GameConfig';
 import {
   BUILDING_ORDER,
   buildingDef,
@@ -95,7 +96,12 @@ describe('BuildingSystem', () => {
     ]);
     const rates = bs.productionRates();
     expect(rates.food).toBeCloseTo(outputPerSec('hunters_hut', 2), 5);
-    expect(rates.wood).toBeCloseTo(outputPerSec('sawmill', 1), 5);
+    // Building output PLUS the baseline forage floor, which is credited with or
+    // without a Sawmill (see WARMTH.BASELINE_FORAGE_WOOD_PER_SEC).
+    expect(rates.wood).toBeCloseTo(
+      outputPerSec('sawmill', 1) + WARMTH.BASELINE_FORAGE_WOOD_PER_SEC,
+      5,
+    );
     expect(rates.coal).toBe(0);
     // Higher hunters' hut level produces strictly more food.
     expect(outputPerSec('hunters_hut', 2)).toBeGreaterThan(outputPerSec('hunters_hut', 1));
@@ -124,6 +130,22 @@ describe('BuildingSystem', () => {
     for (const k of added) expect(buildingDef(k).requiresFurnaceLevel).toBeGreaterThanOrEqual(1);
   });
 
+  it('a hold with nothing built still earns its way to a producer', () => {
+    // The dead-save case: only a Furnace, no producers, and both starter
+    // producers cost something the Furnace burns. Without a floor there is no
+    // affordable action and no income, and nothing in the game can recover it.
+    const bs = new BuildingSystem([{ kind: 'furnace', level: 1, upgradeEndsAt: null }]);
+    const rates = bs.productionRates();
+    expect(rates.wood).toBeGreaterThan(0);
+
+    // The cheapest producer must become affordable in finite time from empty.
+    const hutWood = buildingDef('hunters_hut').baseCost.wood ?? 0;
+    expect(hutWood).toBeGreaterThan(0);
+    const secondsToAfford = hutWood / rates.wood;
+    expect(Number.isFinite(secondsToAfford)).toBe(true);
+    expect(secondsToAfford).toBeLessThan(60 * 10);
+  });
+
   it('the new support buildings are NOT resource producers', () => {
     const bs = new BuildingSystem([
       { kind: 'furnace', level: 5, upgradeEndsAt: null },
@@ -132,10 +154,13 @@ describe('BuildingSystem', () => {
       { kind: 'forge_hall', level: 3, upgradeEndsAt: null },
       { kind: 'envoy_hall', level: 3, upgradeEndsAt: null },
     ]);
-    // None of them contribute to the idle production rates.
+    // None of them contribute to the idle production rates. Timber still shows
+    // the baseline forage floor, which is not a building's output - so this is
+    // asserted as EXACTLY the floor, and would still fail if any of these
+    // buildings started producing timber.
     const rates = bs.productionRates();
     expect(rates.food).toBe(0);
-    expect(rates.wood).toBe(0);
+    expect(rates.wood).toBeCloseTo(WARMTH.BASELINE_FORAGE_WOOD_PER_SEC, 6);
     expect(rates.coal).toBe(0);
     expect(rates.iron).toBe(0);
   });
