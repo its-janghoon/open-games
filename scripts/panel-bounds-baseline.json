@@ -1,0 +1,16 @@
+{
+  "_comment": [
+    "Buttons already hanging outside their panel when scripts/check-panel-bounds.mjs",
+    "was added. Listed explicitly rather than suppressed: the checker fails on any",
+    "NEW violation, and each entry here is real debt to burn down. Lower the counts",
+    "as they are fixed; the checker also fails if a count is left too HIGH, so a fix",
+    "cannot silently rot the baseline.",
+    "Key format: <game slug>/<path within package>#<function>"
+  ],
+  "whiteout/src/scenes/TownScene.ts#showOnboarding": 1,
+  "whiteout/src/scenes/TownScene.ts#buildUpgradePanel": 1,
+  "kingshot/src/scenes/TownScene.ts#buildBattlePanel": 1,
+  "kingshot/src/scenes/TownScene.ts#buildUpgradePanel": 1,
+  "lastwar/src/scenes/CampaignScene.ts#buildHordeSection": 2,
+  "lastwar/src/scenes/SeasonScene.ts#buildResistancePanel": 1
+}
