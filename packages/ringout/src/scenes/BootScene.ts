@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { GAME_HEIGHT, GAME_WIDTH } from '../config/GameConfig';
 import { tr, type Language } from '../i18n/strings';
+import { FONT_STACK } from '../config/fontStack';
 
 /**
  * Title screen.
@@ -23,7 +24,7 @@ export class BootScene extends Phaser.Scene {
 
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60, tr('brand.name', language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '52px',
         color: '#eef2ff',
       })
@@ -31,7 +32,7 @@ export class BootScene extends Phaser.Scene {
 
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 12, tr('title.tagline', language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '17px',
         color: '#9aa7d4',
       })
@@ -39,7 +40,7 @@ export class BootScene extends Phaser.Scene {
 
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 34, tr('title.start', language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '20px',
         color: '#69ffa8',
       })
@@ -52,7 +53,7 @@ export class BootScene extends Phaser.Scene {
     ].join('\n');
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 104, controls, {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '15px',
         color: '#6f7ba8',
         align: 'center',

@@ -27,6 +27,7 @@ import {
 import { poseFor, segments, type Pose } from '../game/pose';
 import { EMPTY_TALLY, recordRound, type Tally } from '../game/tally';
 import { tr, type Language, type TrKey } from '../i18n/strings';
+import { FONT_STACK } from '../config/fontStack';
 
 /**
  * The fight, drawn from geometry alone.
@@ -95,7 +96,7 @@ export class FightScene extends Phaser.Scene {
 
     this.banner = this.add
       .text(GAME_WIDTH / 2, 150, '', {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '40px',
         color: '#eef2ff',
       })
@@ -105,7 +106,7 @@ export class FightScene extends Phaser.Scene {
 
     this.hint = this.add
       .text(GAME_WIDTH / 2, 200, tr('result.rematch', this.language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '18px',
         color: '#69ffa8',
       })
@@ -116,7 +117,7 @@ export class FightScene extends Phaser.Scene {
     // The tally sits between the two hp bars, so each player reads their own score on their own side.
     this.tallyText = this.add
       .text(GAME_WIDTH / 2, 32, '', {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '22px',
         color: '#9aa7d4',
       })

@@ -41,7 +41,7 @@
       "promise": "The games stay small enough for a metered connection, and cannot quietly grow.",
       "checkedBy": "check:budget, gzipped bytes per game per asset class against committed ceilings.",
       "verdict": "pass",
-      "measured": "First wait 161.4–394.9 KB; full download 339–1654.7 KB.",
+      "measured": "First wait 161.4–394.9 KB; full download 339.1–1654.7 KB.",
       "games": [
         {
           "slug": "champs",
@@ -58,10 +58,10 @@
         },
         {
           "slug": "gridfall",
-          "firstWaitKB": 338.1,
-          "totalKB": 339.3,
+          "firstWaitKB": 338.2,
+          "totalKB": 339.5,
           "byClassKB": {
-            "js": 338.5,
+            "js": 338.6,
             "html": 0.9
           }
         },
@@ -93,9 +93,9 @@
         {
           "slug": "ringout",
           "firstWaitKB": 337.8,
-          "totalKB": 339,
+          "totalKB": 339.1,
           "byClassKB": {
-            "js": 338.1,
+            "js": 338.2,
             "html": 0.9
           }
         },
@@ -113,11 +113,11 @@
         },
         {
           "slug": "wirework",
-          "firstWaitKB": 366.7,
-          "totalKB": 781.4,
+          "firstWaitKB": 366.8,
+          "totalKB": 781.5,
           "byClassKB": {
             "audio": 376.4,
-            "js": 366.1,
+            "js": 366.2,
             "image": 37.7,
             "html": 1.3
           }

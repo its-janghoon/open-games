@@ -15,6 +15,7 @@ import { resolveLanguage, tr, type Language } from '../i18n/strings';
 import { openTabTransport, tabTransportAvailable, type Role, type TabTransport } from '../net/tabTransport';
 import { NetSession } from '@open-games/shared';
 import { hashGridWorld } from '../game/gridSimulation';
+import { FONT_STACK } from '../config/fontStack';
 
 /**
  * The first-person view, drawn from geometry alone.
@@ -137,7 +138,7 @@ export class FpsScene extends Phaser.Scene {
 
     this.banner = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60, '', {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '40px',
         color: '#eef2ff',
       })
@@ -146,7 +147,7 @@ export class FpsScene extends Phaser.Scene {
 
     this.rematchHint = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 12, tr('result.rematch', this.language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '18px',
         color: '#69ffa8',
       })
@@ -157,7 +158,7 @@ export class FpsScene extends Phaser.Scene {
     // limit exists in the rules and nowhere a player can read it.
     this.scoreText = this.add
       .text(24, GAME_HEIGHT - 66, '', {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '16px',
         color: '#9aa7d4',
       })
@@ -165,7 +166,7 @@ export class FpsScene extends Phaser.Scene {
 
     this.statusText = this.add
       .text(GAME_WIDTH - 24, GAME_HEIGHT - 40, '', {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '14px',
         color: '#9aa7d4',
       })
@@ -288,8 +289,16 @@ export class FpsScene extends Phaser.Scene {
     while (this.carry >= 1 / 60) {
       this.carry -= 1 / 60;
       if (this.net) {
-        // Networked: send only OUR input. The peer's arrives over the channel and is predicted until it does.
-        this.net.advance(this.readInput(this.role === 'p1' ? '' : 'p2'));
+        /**
+         * Networked: send only OUR input, and read it from the PRIMARY keys whatever role we hold.
+         *
+         * The p2 key set (I/J/K/L/U/O) exists so two people can share one keyboard without their hands colliding.
+         * Over the network there is no collision to avoid — each player is alone at their own device — so binding the
+         * guest to the secondary set would mean the two players use different controls for the same game, and the
+         * guest gets the awkward half. Found by driving two real browser windows: pressing W moved the host and did
+         * nothing at all for the guest.
+         */
+        this.net.advance(this.readInput(''));
       } else {
         // Local: two players on one keyboard, both inputs known, so nothing is ever predicted.
         const session = this.session!;

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { mapDragToMove } from '@open-games/shared';
 import { CANVAS, PALETTE } from '../config/GameConfig';
+import { FONT_STACK } from '../config/fontStack';
 
 /**
  * TOUCH CONTROLS.
@@ -142,7 +143,7 @@ export class TouchControls {
       .setStrokeStyle(2, PALETTE.ACCENT, 0.7);
     const text = s.add
       .text(0, 0, label, {
-        fontFamily: 'monospace',
+        fontFamily: FONT_STACK,
         fontSize: '13px',
         color: PALETTE.TEXT_CSS,
         fontStyle: 'bold',

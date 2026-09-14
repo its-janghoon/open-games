@@ -29,6 +29,17 @@ export const STRINGS = {
   'title.start': { en: 'Press any key to enter', ko: '아무 키나 눌러 입장' },
   'title.p1Controls': { en: 'P1   W A S D   ·   Q E turn   ·   Space fire', ko: 'P1   W A S D   ·   Q E 회전   ·   Space 발사' },
   'title.p2Controls': { en: 'P2   I J K L   ·   U O turn   ·   Enter fire', ko: 'P2   I J K L   ·   U O 회전   ·   Enter 발사' },
+  /**
+   * Says explicitly that the second key set is for sharing ONE keyboard.
+   *
+   * Over the network both players use the P1 keys, because each is alone at their own device and there are no hands
+   * to keep apart. Without this line the screen advertises I J K L to a networked guest whose I J K L do nothing —
+   * which is exactly what driving two real browser windows turned up.
+   */
+  'title.networkNote': {
+    en: 'Over the network both players use the P1 keys.',
+    ko: '네트워크 플레이에서는 두 사람 모두 P1 키를 씁니다.',
+  },
   'title.sharedNote': {
     en: 'Two players, one keyboard. Open a second tab to play over the network.',
     ko: '한 키보드로 두 명. 두 번째 탭을 열면 네트워크로 대전합니다.',

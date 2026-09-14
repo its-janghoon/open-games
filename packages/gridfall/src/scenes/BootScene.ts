@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { GAME_HEIGHT, GAME_WIDTH } from '../config/GameConfig';
 import { resolveLanguage, tr } from '../i18n/strings';
+import { FONT_STACK } from '../config/fontStack';
 
 /**
  * Placeholder first scene. Replace this with the real boot / preload / title
@@ -16,7 +17,7 @@ export class BootScene extends Phaser.Scene {
     const language = resolveLanguage();
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 70, tr('brand.name', language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '50px',
         color: '#eef2ff',
       })
@@ -24,7 +25,7 @@ export class BootScene extends Phaser.Scene {
 
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 22, tr('title.tagline', language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '16px',
         color: '#9aa7d4',
       })
@@ -32,7 +33,7 @@ export class BootScene extends Phaser.Scene {
 
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 22, tr('title.start', language), {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '19px',
         color: '#69ffa8',
       })
@@ -45,10 +46,11 @@ export class BootScene extends Phaser.Scene {
       tr('title.p2Controls', language),
       '',
       tr('title.sharedNote', language),
+      tr('title.networkNote', language),
     ].join('\n');
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 96, lines, {
-        fontFamily: 'system-ui, sans-serif',
+        fontFamily: FONT_STACK,
         fontSize: '14px',
         color: '#6f7ba8',
         align: 'center',
