@@ -12,7 +12,8 @@
     "!packages/_template"
   ],
   "scripts": {
-    "build": "npm run build:games && npm run build:site && npm run check:network && npm run check:payments && npm run check:budget && npm run check:selfhosted",
+    "build": "npm run build:games && npm run build:sw && npm run build:site && npm run check:network && npm run check:payments && npm run check:budget && npm run check:selfhosted",
+    "build:sw": "node scripts/gen-service-worker.mjs",
     "build:games": "npm run build --workspaces --if-present",
     "build:site": "node site/build.mjs",
     "docs:check": "node scripts/gen-readme.mjs --check",

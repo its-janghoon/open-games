@@ -1,20 +1,23 @@
 {
   "_why": "Measured state of the mission's offline promise, kept in the repo so a passing build is not mistaken for a kept promise.",
   "measured": "2026-09-14",
-  "method": "Chrome DevTools Protocol (playwright is not installed on the build host): load the built game from a local static server, warm the cache, set Network.emulateNetworkConditions offline=true, reload, and read window.__GAME__ and the active scene list.",
+  "method": "Chrome DevTools Protocol (playwright is not installed on the build host): load the built game from a local static server, warm the cache, set Network.emulateNetworkConditions offline=true, reload, and read window.__GAME__ and the active scene list. Probe committed at scripts/lib/offline-probe.py.",
   "result": {
+    "boots_offline": true,
+    "games_probed": ["whiteout", "wirework"],
+    "observed": "window.__GAME__ present, game.isRunning true, TitleScene active, and the real menu rendered - not the browser's error page.",
+    "service_worker_present": true,
+    "all_same_origin": true
+  },
+  "before": {
     "boots_offline": false,
     "observed": "Chrome's ERR_INTERNET_DISCONNECTED page. window.__GAME__ absent, zero active scenes.",
-    "game_probed": "whiteout",
-    "requests_when_online": 53,
-    "all_same_origin": true,
-    "service_worker_present": false
+    "cause": "Nothing cached the game. Every request was already same-origin, which is necessary for offline play but not sufficient: with no service worker the browser still had to reach the server, so a cold reload could not even fetch index.html."
   },
-  "why_it_fails": "Nothing caches the game. Every request is same-origin under the game's own directory, which is necessary for offline play but not sufficient: without a service worker the browser still has to reach the server, so a cold reload with no network cannot even fetch index.html.",
-  "what_is_gated_today": "check:selfhosted asserts the precondition that is true and worth keeping: every asset path a bundle names exists in dist and none is cross-origin. It deliberately does NOT claim the games boot offline.",
-  "to_make_it_true": [
-    "Add a service worker per game that precaches the cold-load set (index.html, the JS chunks, the fonts) on install and serves it cache-first, then caches audio and sprites on first use.",
-    "Register it from the game's entry point, and keep the registration a no-op when the page is not served over http(s) so a file:// open still works.",
-    "Extend this gate to drive the CDP offline probe once a worker exists, so the claim is measured rather than asserted."
+  "how_it_works": "scripts/gen-service-worker.mjs runs after the game builds and writes a per-game sw.js plus a guarded registration snippet into index.html. It precaches the cold-load set (index.html and everything index.html references: JS chunks and fonts) on install, then caches same-origin responses as they are first used, which is how Phaser's sprites and audio survive going offline. Navigation requests fall back to the cached index.html so a reload with no network boots the game instead of the browser's error page. The cache name carries a hash of the precache list so a new build replaces the old cache rather than serving a stale bundle.",
+  "not_yet_measured": [
+    "kingshot, lastwar and champs have generated workers from the same script but were not probed; only whiteout and wirework were.",
+    "Deep offline play - reaching a scene whose sprites were never fetched while online. Those are runtime-cached on first use, so an asset never touched while online is still unavailable offline by design.",
+    "The probe is a maintainer tool, not part of `npm run build`: it needs a live browser, so the build gates the precondition (check:selfhosted) rather than the boot."
   ]
 }

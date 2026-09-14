@@ -77,6 +77,12 @@ async def main() -> None:
         report = {"url": url}
 
         # --- pass 1: online, warm the cache -------------------------------
+        # Navigate away first. Re-navigating to the SAME url while the tab sits on
+        # Chrome's network-error page for that url does not reliably refetch, which
+        # made an earlier version of this probe report the error page during its
+        # ONLINE pass and look like a broken game.
+        await send("Page.navigate", {"url": "about:blank"})
+        await asyncio.sleep(0.7)
         await send("Network.setCacheDisabled", {"cacheDisabled": False})
         await send("Page.navigate", {"url": url})
         await asyncio.sleep(settle / 1000)
