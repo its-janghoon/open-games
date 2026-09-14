@@ -128,6 +128,53 @@ describe('input-only netcode', () => {
     expect(new Set(ticks).size, 'no tick reported twice').toBe(ticks.length);
   });
 
+  it('sends a checksum on the interval, not on every confirmed tick', () => {
+    /**
+     * Traffic, and on this project's terms that is a correctness concern rather than a nicety: the whole point of
+     * input-only netcode here is that it costs a few bytes a tick on a metered connection. Injecting "never
+     * advance the due cursor" failed nothing — every confirmed tick got its own checksum, which is correct and
+     * roughly twenty times the messages.
+     */
+    const sent: NetMessage<Input>[] = [];
+    const link = createLinkPair<Input>();
+    const watched: typeof link.a = {
+      send: (message) => {
+        sent.push(message);
+        link.a.send(message);
+      },
+      onMessage: (handler) => link.a.onMessage(handler),
+    };
+    const a = new NetSession<State, Input>({
+      sim: sim(),
+      participants: ['a', 'b'],
+      localParticipant: 'a',
+      link: watched,
+      hashState,
+      checksumInterval: 20,
+    });
+    const b = new NetSession<State, Input>({
+      sim: sim(),
+      participants: ['a', 'b'],
+      localParticipant: 'b',
+      link: link.b,
+      hashState,
+      checksumInterval: 20,
+    });
+
+    for (let tick = 0; tick < 60; tick += 1) {
+      a.advance({ dx: 1 });
+      b.advance({ dx: 1 });
+      link.deliver();
+    }
+    link.deliver();
+
+    const checksums = sent.filter((m) => m.type === 'checksum');
+    expect(checksums.length, 'no checksum was ever sent').toBeGreaterThan(0);
+    expect(checksums.length, `${checksums.length} checksums in 60 ticks at interval 20`).toBeLessThan(
+      6,
+    );
+  });
+
   it('does not report a desync from a merely predicted tick', () => {
     // Checksums are taken at the local tick and compared only when BOTH sides have one for it. While
     // an input is still in flight the two peers legitimately hold different guesses; reporting that

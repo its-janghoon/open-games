@@ -103,6 +103,8 @@ export class NetSession<State, Input> {
    * where an early-arriving checksum is silently dropped and a real desync goes unreported.
    */
   private readonly localHashes = new Map<number, string>();
+  /** Earliest tick at which the next checksum may be taken. Advances only when one is actually sent. */
+  private nextChecksumAt: number;
   private readonly remoteHashes = new Map<number, string>();
   private readonly reported = new Set<number>();
 
@@ -124,6 +126,7 @@ export class NetSession<State, Input> {
     this.localParticipant = options.localParticipant;
     this.hashState = options.hashState;
     this.checksumInterval = options.checksumInterval ?? DEFAULT_CHECKSUM_INTERVAL;
+    this.nextChecksumAt = this.checksumInterval;
     this.onDesync = options.onDesync;
     this.session = new RollbackSession(options.sim, {
       participants: options.participants,
@@ -182,7 +185,28 @@ export class NetSession<State, Input> {
 
   private maybeChecksum(): void {
     const tick = this.session.stats().tick;
-    if (tick === 0 || tick % this.checksumInterval !== 0) return;
+    if (tick === 0 || tick < this.nextChecksumAt) return;
+    /**
+     * Hash the CURRENT state, but only on a tick that is already fully confirmed — every remote input for every
+     * earlier tick has arrived, so this state used no predictions and two correct peers necessarily agree.
+     *
+     * Two earlier mechanisms failed, both measured:
+     *
+     *   - Hashing at every interval multiple and comparing immediately reported a desync at tick 80 between two
+     *     sessions that then agreed completely. Both hashes were honest hashes of PARTLY PREDICTED states: each
+     *     side had the other's inputs only to about tick 74 and filled the rest with its own guesses.
+     *   - Buffering the hash until its tick became confirmed looked right and exchanged nothing at all. A
+     *     rollback arriving in the same delivery batch invalidates the buffered hash — correctly, since the
+     *     replay rewrote that tick — and because that happens on essentially every interval, no checksum ever
+     *     left the session and a genuinely drifting peer went unreported. The full test suite caught it.
+     *
+     * Waiting for a tick where the local state needs no prediction avoids both: nothing is held, so nothing can
+     * be invalidated while held, and nothing predicted is ever compared. Under sustained lag the check simply
+     * goes quiet, which is the right failure — a periodic check that pauses is useful, one that cries wolf while
+     * packets are late is worse than none.
+     */
+    if (tick > this.confirmedThrough) return;
+    this.nextChecksumAt = tick + this.checksumInterval;
     const hash = this.hashState(this.session.peek());
     this.localHashes.set(tick, hash);
     this.link.send({ type: 'checksum', tick, hash });
@@ -206,6 +230,8 @@ export class NetSession<State, Input> {
       // indistinguishable from a real disagreement, and reporting one would be a false alarm during
       // ordinary late-packet handling.
       if (result.accepted && result.resimulated > 0) this.invalidateFrom(message.tick);
+      // An arriving input moves the confirmed horizon, which is what can make a due checksum takeable.
+      this.maybeChecksum();
       return;
     }
     this.remoteHashes.set(message.tick, message.hash);
@@ -225,6 +251,7 @@ export class NetSession<State, Input> {
   private invalidateFrom(tick: number): void {
     for (const at of [...this.localHashes.keys()]) if (at >= tick) this.localHashes.delete(at);
     for (const at of [...this.remoteHashes.keys()]) if (at >= tick) this.remoteHashes.delete(at);
+
   }
 
   private noteReceived(participantId: string, tick: number): void {

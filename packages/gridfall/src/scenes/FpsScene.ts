@@ -11,6 +11,10 @@ import {
   type GridWorld,
 } from '../game/gridWorld';
 import { castView, projectionDistance, shade, shadeColor, wallHeight } from '../game/raycast';
+import { resolveLanguage, tr, type Language } from '../i18n/strings';
+import { openTabTransport, tabTransportAvailable, type Role, type TabTransport } from '../net/tabTransport';
+import { NetSession } from '@open-games/shared';
+import { hashGridWorld } from '../game/gridSimulation';
 
 /**
  * The first-person view, drawn from geometry alone.
@@ -52,7 +56,21 @@ const PALETTE = {
 } as const;
 
 export class FpsScene extends Phaser.Scene {
-  private session!: RollbackSession<GridWorld, FpsInput>;
+  /**
+   * Exactly one of these drives the match.
+   *
+   * A local session when this tab is alone (two players share the keyboard), a NetSession when a second tab
+   * answered the handshake. They are kept as separate fields rather than behind one interface because they are
+   * driven differently — a local session is told both players' inputs, a networked one is told only ours — and
+   * hiding that behind a common shape would make the difference easy to get wrong silently.
+   */
+  private session?: RollbackSession<GridWorld, FpsInput>;
+  private net?: NetSession<GridWorld, FpsInput>;
+  private transport?: TabTransport;
+  private role: Role = 'p1';
+  private language: Language = 'ko';
+  private statusText!: Phaser.GameObjects.Text;
+  private desyncAt: number | null = null;
   private view!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Graphics;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -70,10 +88,12 @@ export class FpsScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.language = resolveLanguage();
     this.session = new RollbackSession(createGridSimulation(['p1', 'p2']), {
       participants: ['p1', 'p2'],
       maxRollbackTicks: 240,
     });
+    this.connectIfAnotherTabIsOpen();
 
     this.cameras.main.setBackgroundColor(PALETTE.ceiling);
     this.view = this.add.graphics();
@@ -90,18 +110,36 @@ export class FpsScene extends Phaser.Scene {
       turnLeftAlt: K.Q,
       turnRightAlt: K.E,
       fire: K.SPACE,
+      // Player two, on the right-hand cluster. IJKL rather than the arrows because the arrows are already
+      // player one's turn keys, and a shared keyboard where two players fight over the same key is worse than
+      // an unfamiliar layout.
+      p2Forward: K.I,
+      p2Back: K.K,
+      p2StrafeLeft: K.J,
+      p2StrafeRight: K.L,
+      p2TurnLeft: K.U,
+      p2TurnRight: K.O,
+      p2Fire: K.ENTER,
     }) as Record<string, Phaser.Input.Keyboard.Key>;
+
+    this.statusText = this.add
+      .text(GAME_WIDTH - 24, GAME_HEIGHT - 40, '', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '14px',
+        color: '#9aa7d4',
+      })
+      .setOrigin(1, 0);
 
     // Read-only observation surface for the browser probe, mirroring ringout's. `snapshot` is here because a
     // production bundle has no Phaser global, so a probe cannot reach the renderer — and reading the WebGL
     // canvas directly returns blank without preserveDrawingBuffer.
     (window as unknown as { __GRIDFALL__?: unknown }).__GRIDFALL__ = {
-      peek: () => this.session.peek(),
-      tick: () => this.session.stats().tick,
-      columns: () => {
-        const world = this.session.peek();
-        return castView(world.players[0], COLUMNS);
-      },
+      peek: () => this.world(),
+      tick: () => (this.net ? this.net.tick : this.session!.stats().tick),
+      hash: () => hashGridWorld(this.world()),
+      role: () => this.role,
+      networked: () => this.net !== undefined,
+      columns: () => castView(this.eye(), COLUMNS),
       snapshot: () =>
         new Promise<string | null>((resolve) => {
           this.game.renderer.snapshot((image) => {
@@ -112,16 +150,77 @@ export class FpsScene extends Phaser.Scene {
     };
   }
 
-  private readInput(): FpsInput {
-    const down = (name: string) => this.keys[name]?.isDown ?? false;
+  /**
+   * Try the tab-to-tab transport, and carry on locally if nothing answers.
+   *
+   * Deliberately non-blocking: a player who opened one tab wants the shared-keyboard game immediately, so the
+   * scene starts on a local session and swaps to a networked one only if a peer actually appears. Waiting for a
+   * peer that will never arrive would make the single-tab case feel broken.
+   */
+  shutdown(): void {
+    // Closing the channel matters: a tab that navigates away without it leaves a listener that answers the next
+    // tab's handshake, so a fresh pair would negotiate against a ghost.
+    this.transport?.close();
+    this.transport = undefined;
+  }
+
+  private connectIfAnotherTabIsOpen(): void {
+    if (!tabTransportAvailable()) return;
+    const transport = openTabTransport();
+    this.transport = transport;
+    void transport.role.then((role) => {
+      this.role = role;
+    });
+    // Gated on a CONFIRMED peer, not on the role settling: p1's role resolves on a timeout, which is also what
+    // happens when it is alone, so upgrading there would put a lone tab into a networked match against nobody.
+    transport.onPeer(() => {
+      void transport.role.then((role) => this.startNetworked(transport, role));
+    });
+  }
+
+  private startNetworked(transport: TabTransport, role: Role): void {
+    if (this.net) return;
+    this.session = undefined;
+    this.net = new NetSession<GridWorld, FpsInput>({
+      sim: createGridSimulation(['p1', 'p2']),
+      participants: ['p1', 'p2'],
+      localParticipant: role,
+      link: transport.link,
+      hashState: hashGridWorld,
+      checksumInterval: 60,
+      maxRollbackTicks: 240,
+      onDesync: (report) => {
+        // Reported, never repaired. Repair would mean shipping world state, which abandons input-only and hands
+        // one tab authority over the other; showing it turns a silent disagreement into something a player can
+        // see and restart out of.
+        this.desyncAt = report.tick;
+      },
+    });
+  }
+
+  /** The world, from whichever driver is active. */
+  private world(): GridWorld {
+    return this.net ? this.net.peek() : this.session!.peek();
+  }
+
+  /** The player this tab looks through. */
+  private eye() {
+    const world = this.world();
+    return world.players[this.role === 'p1' ? 0 : 1];
+  }
+
+  private readInput(prefix: '' | 'p2'): FpsInput {
+    const key = (name: string) =>
+      prefix === '' ? name : `p2${name[0].toUpperCase()}${name.slice(1)}`;
+    const down = (name: string) => this.keys[key(name)]?.isDown ?? false;
     return {
       ...NEUTRAL_FPS_INPUT,
       forward: down('forward'),
       back: down('back'),
       left: down('strafeLeft'),
       right: down('strafeRight'),
-      turnLeft: down('turnLeft') || down('turnLeftAlt'),
-      turnRight: down('turnRight') || down('turnRightAlt'),
+      turnLeft: down('turnLeft') || (prefix === '' && down('turnLeftAlt')),
+      turnRight: down('turnRight') || (prefix === '' && down('turnRightAlt')),
       fire: down('fire'),
     };
   }
@@ -132,20 +231,24 @@ export class FpsScene extends Phaser.Scene {
     this.carry += Math.min(deltaMs / 1000, 0.25);
     while (this.carry >= 1 / 60) {
       this.carry -= 1 / 60;
-      const at = this.session.stats().tick;
-      const input = this.readInput();
-      this.session.setLocalInput('p1', input);
-      // The second player is idle until the network slice lands. Stated rather than hidden: this is a
-      // single-player view of a two-player world, not a bot.
-      this.session.setLocalInput('p2', NEUTRAL_FPS_INPUT);
-      this.session.advanceTo(at + 1);
+      if (this.net) {
+        // Networked: send only OUR input. The peer's arrives over the channel and is predicted until it does.
+        this.net.advance(this.readInput(this.role === 'p1' ? '' : 'p2'));
+      } else {
+        // Local: two players on one keyboard, both inputs known, so nothing is ever predicted.
+        const session = this.session!;
+        const at = session.stats().tick;
+        session.setLocalInput('p1', this.readInput(''));
+        session.setLocalInput('p2', this.readInput('p2'));
+        session.advanceTo(at + 1);
+      }
     }
     this.draw();
   }
 
   private draw(): void {
-    const world = this.session.peek();
-    const eye = world.players[0];
+    const world = this.world();
+    const eye = this.eye();
     const g = this.view;
     g.clear();
 
@@ -182,8 +285,8 @@ export class FpsScene extends Phaser.Scene {
    * is drawn through it, which in a shooter is not a cosmetic bug but a wallhack.
    */
   private drawOpponent(g: Phaser.GameObjects.Graphics, world: GridWorld): void {
-    const eye = world.players[0];
-    const other = world.players[1];
+    const eye = this.eye();
+    const other = world.players[this.role === 'p1' ? 1 : 0];
     if (!isAlive(other)) return;
 
     const dx = other.x - eye.x;
@@ -209,10 +312,10 @@ export class FpsScene extends Phaser.Scene {
     g.fillRect(screenX - width / 2, GAME_HEIGHT / 2 - height / 2, width, height);
   }
 
-  private drawHud(world: GridWorld): void {
+  private drawHud(_world: GridWorld): void {
     const g = this.hud;
     g.clear();
-    const me = world.players[0];
+    const me = this.eye();
 
     // Crosshair. Two short strokes rather than a dot, so it stays visible against both the floor band and a
     // brightly lit near wall.
@@ -230,5 +333,15 @@ export class FpsScene extends Phaser.Scene {
     g.fillRect(24, GAME_HEIGHT - 40, barWidth, 14);
     g.fillStyle(fraction <= 0.25 ? PALETTE.hpLow : PALETTE.hpFill, 1);
     g.fillRect(24, GAME_HEIGHT - 40, barWidth * fraction, 14);
+
+    this.statusText.setText(
+      this.desyncAt !== null
+        ? tr('net.desync', this.language, { tick: this.desyncAt })
+        : this.net
+          ? tr('net.connected', this.language, {
+              role: tr(this.role === 'p1' ? 'net.roleHost' : 'net.roleGuest', this.language),
+            })
+          : tr('net.local', this.language),
+    );
   }
 }
