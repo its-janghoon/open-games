@@ -169,7 +169,7 @@ claims.push({
   id: 'works-offline',
   promise: 'A game that has been opened once keeps working with no network.',
   checkedBy:
-    'A real browser driven over the DevTools protocol with the network denied, not an assertion. Re-runnable: scripts/lib/offline-probe.py.',
+    'a real browser driven over the DevTools protocol with the network denied, not an assertion. Re-runnable with scripts/lib/offline-probe.py.',
   verdict: offline?.result?.boots_offline ? 'pass' : 'not verified',
   measured: offline
     ? `${offline.result.observed} Games probed: ${(offline.result.games_probed ?? []).join(', ')}.`

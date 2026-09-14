@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sponsor · Open Games</title>
+    <meta
+      name="description"
+      content="What Open Games promises players, how each promise is checked by the build, and what the checks measured."
+    />
+    <link rel="icon" href="../favicon.svg" />
+    <link rel="stylesheet" href="../shell.css" />
+    <style>
+      /*
+       * Page-specific rules only. Tokens, header and footer live in shell.css so this
+       * page and the landing page cannot drift apart.
+       *
+       * The layout is a verdict LIST, not a dashboard. Every row states a promise, how
+       * it is checked, and what the check found - in that order, because the promise is
+       * the thing a sponsor cares about and the number is the evidence for it. No stat
+       * strip above the fold: the studio-site research behind the landing page found
+       * zero of seven premium sites putting a number there, and a compliance page that
+       * opens with a scoreboard reads like an ad for itself.
+       */
+      .lede {
+        padding: clamp(72px, 12vw, 132px) 0 clamp(28px, 5vw, 52px);
+        border-bottom: 1px solid var(--line);
+      }
+      .lede h1 {
+        margin: 0 0 18px;
+        font-size: clamp(34px, 6.2vw, 62px);
+        line-height: 1.02;
+        letter-spacing: -0.022em;
+        font-weight: 620;
+        max-width: 20ch;
+      }
+      .lede p {
+        margin: 0;
+        max-width: 62ch;
+        color: var(--dim);
+        font-size: clamp(15px, 1.6vw, 18px);
+        line-height: 1.62;
+      }
+      .lede .meta {
+        margin-top: 22px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--faint);
+        letter-spacing: 0.02em;
+      }
+
+      .claims {
+        list-style: none;
+        margin: 0;
+        padding: clamp(28px, 5vw, 56px) 0 0;
+      }
+      .claim {
+        padding: 26px 0;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: 108px minmax(0, 1fr);
+        gap: 22px;
+        align-items: start;
+      }
+      .verdict {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        padding: 5px 9px;
+        border: 1px solid var(--line-strong);
+        border-radius: 3px;
+        color: var(--dim);
+        white-space: nowrap;
+        justify-self: start;
+      }
+      .verdict.pass {
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+      }
+      .verdict.fail {
+        color: #ff8b7a;
+        border-color: rgba(255, 139, 122, 0.5);
+      }
+      .claim h2 {
+        margin: 0 0 8px;
+        font-size: clamp(17px, 2vw, 21px);
+        font-weight: 600;
+        letter-spacing: -0.012em;
+        line-height: 1.3;
+      }
+      .claim .measured {
+        margin: 0 0 8px;
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.55;
+      }
+      .claim .how,
+      .claim .note {
+        margin: 0 0 6px;
+        color: var(--dim);
+        font-size: 14px;
+        line-height: 1.6;
+        max-width: 72ch;
+      }
+      .claim .note {
+        color: var(--faint);
+      }
+
+      table.sizes {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 14px 0 4px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+      }
+      table.sizes th,
+      table.sizes td {
+        text-align: right;
+        padding: 7px 10px 7px 0;
+        border-bottom: 1px solid var(--line);
+        color: var(--dim);
+      }
+      table.sizes th:first-child,
+      table.sizes td:first-child {
+        text-align: left;
+        color: var(--text);
+      }
+      table.sizes th {
+        color: var(--faint);
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        font-size: 10.5px;
+      }
+
+      .block {
+        padding: clamp(40px, 7vw, 76px) 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .block h2 {
+        margin: 0 0 16px;
+        font-size: clamp(22px, 3vw, 30px);
+        font-weight: 620;
+        letter-spacing: -0.016em;
+      }
+      .block dl {
+        margin: 0;
+        display: grid;
+        gap: 16px;
+      }
+      .block dt {
+        font-size: 13px;
+        font-family: var(--mono);
+        color: var(--faint);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .block dd {
+        margin: 5px 0 0;
+        color: var(--dim);
+        font-size: 15px;
+        line-height: 1.62;
+        max-width: 70ch;
+      }
+      .open-item {
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        padding: 20px 22px;
+        margin-top: 6px;
+      }
+      .open-item h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .open-item p {
+        margin: 0 0 8px;
+        color: var(--dim);
+        font-size: 14px;
+        line-height: 1.6;
+        max-width: 74ch;
+      }
+      .open-item p:last-child {
+        margin-bottom: 0;
+      }
+
+      @media (max-width: 620px) {
+        .claim {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#claims">Skip to the checks</a>
+    <!-- @header -->
+
+    <main>
+      <section class="lede wrap">
+        <h1>Every promise on this page is something the build refuses to break.</h1>
+        <p>
+          Open Games is free, has no purchases, contacts no third party, and keeps working
+          when the network does not. Those are the reasons to fund it, so each one is a
+          check the build runs — and this page is that build&rsquo;s output, not a
+          description of it. The numbers below were measured by the same commands anyone
+          can run on the repository.
+        </p>
+        <p class="meta"><!-- @generated --></p>
+      </section>
+
+      <section class="wrap" id="claims">
+        <ul class="claims"><!-- @claims --></ul>
+      </section>
+
+      <!-- @open -->
+
+      <section class="block wrap" id="funding">
+        <h2>Funding</h2>
+        <dl><!-- @funding --></dl>
+      </section>
+    </main>
+
+    <!-- @footer -->
+  </body>
+</html>

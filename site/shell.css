@@ -1,0 +1,205 @@
+/*
+ * Shared page chrome for the generated site: design tokens, base type, the skip
+ * link, the header and the footer.
+ *
+ * Extracted when the sponsorship page was added, so the two pages cannot drift into
+ * two visual languages. Everything page-specific stays inline in each template.
+ *
+ * The tokens and the header treatment came out of reading real studio sites rather
+ * than taste: a single-colour wordmark that survives favicon size, no player-facing
+ * numbers above the fold, and the product call to action as the one filled button.
+ */
+
+      :root {
+        color-scheme: dark;
+        --ink: #07080d;
+        --ink-2: #0c0e16;
+        --line: rgba(255, 255, 255, 0.09);
+        --line-strong: rgba(255, 255, 255, 0.2);
+        --text: #f3f5fb;
+        --dim: #9aa3bf;
+        --faint: #626a86;
+        --accent: #45e0c8;
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--ink);
+        color: var(--text);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      .wrap {
+        width: 100%;
+        max-width: 76rem;
+        margin: 0 auto;
+        padding: 0 1.75rem;
+      }
+      /* Reachable-by-keyboard skip target: the games are the point of the page. */
+      .skip {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        background: var(--text);
+        color: var(--ink);
+        padding: 0.6rem 1rem;
+        z-index: 100;
+      }
+      .skip:focus {
+        left: 0.5rem;
+        top: 0.5rem;
+      }
+
+      /* ===================== header ===================== */
+      header.top {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: rgba(7, 8, 13, 0.78);
+        backdrop-filter: blur(14px) saturate(150%);
+        border-bottom: 1px solid var(--line);
+      }
+      .top-in {
+        height: 4rem;
+        display: flex;
+        align-items: center;
+        gap: 2.25rem;
+      }
+      /* The mark scales off font-size so glyph and wordmark stay locked. */
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.62em;
+        margin-right: auto;
+        font-size: 0.86rem;
+      }
+      .brand svg {
+        width: 1.35em;
+        height: 1.35em;
+        display: block;
+        flex: none;
+      }
+      .brand-name {
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        white-space: nowrap;
+      }
+      nav.links {
+        display: flex;
+        gap: 1.9rem;
+      }
+      nav.links a {
+        font-size: 0.86rem;
+        color: var(--dim);
+        transition: color 0.15s ease;
+      }
+      nav.links a:hover,
+      nav.links a:focus-visible {
+        color: var(--text);
+      }
+      /*
+        Two audiences, ranked - never balanced. The product CTA ("Play free")
+        lives in the hero; the contributor CTAs sit quietly at the far right with
+        different verbs and less weight. Godot, Bevy and Blender all do this, and
+        none of them shows a star count: a live count is a growth device for
+        app-first projects, not a studio signal.
+      */
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .gh-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.15rem;
+        height: 2.15rem;
+        border-radius: 7px;
+        color: var(--faint);
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+      .gh-icon:hover,
+      .gh-icon:focus-visible {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .gh-icon svg {
+        width: 1.15rem;
+        height: 1.15rem;
+      }
+      .btn-quiet {
+        display: inline-flex;
+        align-items: center;
+        height: 2.15rem;
+        padding: 0 0.95rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        color: var(--text);
+        font-size: 0.82rem;
+        font-weight: 500;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .btn-quiet:hover,
+      .btn-quiet:focus-visible {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.38);
+      }
+
+
+      /* ===================== footer ===================== */
+      footer {
+        border-top: 1px solid var(--line);
+        padding: 2.4rem 0 3.2rem;
+      }
+      .foot-in {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.3rem;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.82rem;
+        color: var(--faint);
+      }
+      .foot-links {
+        display: flex;
+        gap: 1.4rem;
+        flex-wrap: wrap;
+      }
+      .foot-links a {
+        color: var(--dim);
+      }
+      .foot-links a:hover,
+      .foot-links a:focus-visible {
+        color: var(--text);
+      }
+
+      @media (max-width: 900px) {
+        nav.links {
+          display: none;
+        }
+        a.game {
+          grid-template-columns: 1fr;
+          gap: 1.1rem;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+        html {
+          scroll-behavior: auto;
+        }
+      }

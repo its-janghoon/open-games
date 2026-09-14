@@ -15,7 +15,7 @@
  *
  * Adding a game never requires touching this script or the template.
  */
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -212,6 +212,145 @@ function main() {
     `[site] wrote ${join(outDir, 'index.html')} with ${games.length} game(s), ` +
       `flagship "${flagship.slug}"` +
       (wip > 0 ? ` (${wip} marked work in progress)` : ''),
+  );
+
+  // Shared chrome, so the two pages cannot drift into two visual languages.
+  copyFileSync(join(siteDir, 'shell.css'), join(outDir, 'shell.css'));
+  buildSponsorPage(template, outDir);
+}
+
+/**
+ * Render the sponsorship page from the generated compliance report.
+ *
+ * The body is the report, deliberately. The reason to fund this project is what it
+ * promises players, and a promise nobody can check is marketing - so the page shows
+ * each promise, the command that checks it, and what that command measured. It is
+ * generated rather than written for the same reason: prose about compliance drifts
+ * from the build, and output cannot.
+ *
+ * The header and footer are lifted out of the landing template rather than
+ * duplicated, so a change to the site's chrome reaches both pages.
+ */
+function buildSponsorPage(indexTemplate, outDir) {
+  const reportPath = join(siteDir, 'compliance.json');
+  if (!existsSync(reportPath)) {
+    console.warn(
+      '[site] no site/compliance.json; skipping the sponsor page. Run `npm run compliance` first.',
+    );
+    return;
+  }
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  const template = readFileSync(join(siteDir, 'sponsor.template.html'), 'utf8');
+
+  // Reuse the landing page's own header and footer markup verbatim.
+  const between = (source, open, close) => {
+    const start = source.indexOf(open);
+    const end = source.indexOf(close, start);
+    if (start === -1 || end === -1) return '';
+    return source.slice(start, end + close.length);
+  };
+  const header = between(indexTemplate, '<header class="top">', '</header>');
+  const footer = between(indexTemplate, '<footer', '</footer>');
+  if (!header || !footer) {
+    throw new Error('site/index.template.html no longer exposes a <header>/<footer> to share');
+  }
+  // On the sponsor page the header's in-page anchors would point at sections that
+  // only exist on the landing page.
+  // The page lives one directory down, so every root-relative "./" in the shared
+  // chrome has to become "../". Missing this rendered the whole page unstyled: the
+  // stylesheet resolved to /sponsor/shell.css, which does not exist, and the inline
+  // wordmark expanded to full width with no CSS to size it.
+  const upOneLevel = (markup) =>
+    markup
+      .replace(/href="#contribute"/g, 'href="../#contribute"')
+      .replace(/href="#catalogue"/g, 'href="../#catalogue"')
+      .replace(/href="#about"/g, 'href="../#about"')
+      .replace(/href="\.\/"/g, 'href="../"')
+      .replace(/(href|src)="\.\/(?!\/)/g, '$1="../');
+  const sponsorHeader = upOneLevel(header);
+
+  const claims = report.claims
+    .map((claim) => {
+      const verdictClass = claim.verdict === 'pass' ? 'pass' : claim.verdict === 'fail' ? 'fail' : '';
+      const parts = [
+        `<h2>${escapeHtml(claim.promise)}</h2>`,
+        `<p class="measured">${escapeHtml(claim.measured)}</p>`,
+        `<p class="how">Checked by ${escapeHtml(claim.checkedBy)}</p>`,
+      ];
+      if (Array.isArray(claim.games) && claim.games.length > 0) {
+        const rows = claim.games
+          .map(
+            (g) =>
+              `<tr><td>${escapeHtml(g.slug)}</td><td>${g.firstWaitKB} KB</td><td>${g.totalKB} KB</td></tr>`,
+          )
+          .join('');
+        parts.push(
+          '<table class="sizes"><thead><tr><th>Game</th><th>First wait</th>' +
+            `<th>Full download</th></tr></thead><tbody>${rows}</tbody></table>`,
+        );
+      }
+      if (Array.isArray(claim.findings) && claim.findings.length > 0) {
+        parts.push(
+          `<p class="how">Findings: ${claim.findings
+            .map((f) => escapeHtml(`${f.file} — ${f.kind}`))
+            .join('; ')}</p>`,
+        );
+      }
+      if (claim.note) parts.push(`<p class="note">${escapeHtml(claim.note)}</p>`);
+      for (const item of claim.notYetMeasured ?? []) {
+        parts.push(`<p class="note">Not measured: ${escapeHtml(item)}</p>`);
+      }
+      return (
+        `<li class="claim"><span class="verdict ${verdictClass}">${escapeHtml(claim.verdict)}</span>` +
+        `<div>${parts.join('')}</div></li>`
+      );
+    })
+    .join('\n');
+
+  // Open work is shown as prominently as the passes. A page that could only report
+  // successes would be the marketing this one exists instead of.
+  const open =
+    (report.openWork ?? []).length === 0
+      ? ''
+      : `<section class="block wrap" id="open"><h2>Known and not yet done</h2>${(report.openWork ?? [])
+          .map(
+            (item) =>
+              `<div class="open-item"><h3>${escapeHtml(item.item)}</h3>` +
+              `<p>${escapeHtml(item.size ?? '')}</p>` +
+              `<p>${escapeHtml(item.why ?? '')}</p>` +
+              (item.needs ? `<p>Needs: ${escapeHtml(item.needs)}</p>` : '') +
+              '</div>',
+          )
+          .join('')}</section>`;
+
+  const funding = Object.entries(report.funding ?? {})
+    .map(
+      ([key, value]) =>
+        `<div><dt>${escapeHtml(key.replace(/([A-Z])/g, ' $1').toLowerCase())}</dt>` +
+        `<dd>${escapeHtml(value)}</dd></div>`,
+    )
+    .join('');
+
+  const html = template
+    .replace('<!-- @header -->', sponsorHeader)
+    .replace('<!-- @footer -->', upOneLevel(footer))
+    .replace('<!-- @claims -->', claims)
+    .replace('<!-- @open -->', open)
+    .replace('<!-- @funding -->', funding)
+    .replace(
+      '<!-- @generated -->',
+      escapeHtml(
+        `Generated ${report.generated} by ${report.generatedBy} · ${report.summary.passing}/${report.summary.claims} checks passing · reproduce with: ${report.howToReproduce}`,
+      ),
+    );
+
+  const dir = join(outDir, 'sponsor');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'index.html'), html);
+  console.log(
+    `[site] wrote ${join(dir, 'index.html')} from the compliance report ` +
+      `(${report.summary.passing}/${report.summary.claims} checks passing, ` +
+      `${(report.openWork ?? []).length} open item(s))`,
   );
 }
 
