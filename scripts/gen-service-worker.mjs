@@ -45,23 +45,40 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** Files index.html directly references, as scope-relative paths. */
+/** Files the page needs, as scope-relative paths: tag references plus CSS url(). */
 function coldLoadSet(dist) {
   const indexPath = join(dist, 'index.html');
   if (!existsSync(indexPath)) return null;
   const html = readFileSync(indexPath, 'utf8');
   const all = walk(dist);
   const set = new Set(['./']); // the navigation itself
-  for (const m of html.matchAll(/(?:src|href)\s*=\s*"([^"]+)"/g)) {
-    const ref = m[1];
-    if (ref.startsWith('data:')) continue;
-    const name = basename(ref.split('?')[0]);
+
+  const addByName = (ref) => {
+    if (!ref || ref.startsWith('data:') || /^[a-z]+:\/\//i.test(ref)) return;
+    // Match by file NAME: the built paths are absolute to a deploy base that does
+    // not exist on disk, so resolving them literally would find nothing.
+    const name = basename(ref.split('?')[0].split('#')[0]);
     for (const f of all) {
-      if (basename(f) === name) {
-        set.add(`./${relative(dist, f).split('\\').join('/')}`);
-      }
+      if (basename(f) === name) set.add(`./${relative(dist, f).split('\\').join('/')}`);
+    }
+  };
+
+  for (const m of html.matchAll(/(?:src|href)\s*=\s*"([^"]+)"/g)) addByName(m[1]);
+
+  // Also take url() out of inline and linked CSS. A font declared in @font-face is
+  // needed OFFLINE even when it is deliberately not preloaded: champs stopped
+  // preloading its two 540 KB Korean weights because that made a metered player wait
+  // 1.09 MB before the game itself, but the worker installs in the BACKGROUND after
+  // load, so precaching them there costs nothing at startup and is what keeps
+  // offline text from falling back to a system face.
+  for (const m of html.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) addByName(m[1]);
+  for (const file of all) {
+    if (!file.endsWith('.css')) continue;
+    for (const m of readFileSync(file, 'utf8').matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) {
+      addByName(m[1]);
     }
   }
+
   return [...set];
 }
 

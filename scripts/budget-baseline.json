@@ -1,9 +1,8 @@
 {
   "_why": "Gzipped transfer ceilings per game. The mission is that these games are reachable on metered data, so bytes need something that refuses them. Ceilings are measured-today plus ~8% headroom, deliberately not an aspiration: a budget nobody can meet gets raised until it means nothing.",
   "_knownWins": [
-    "DONE: audio was WAV (uncompressed PCM) at 855-1270 KB gzipped per game, larger than the Phaser engine. Re-encoded to Ogg/Opus with an AAC/m4a fallback: 4352 KB of WAV across the games became 775 KB of Opus or 862 KB of AAC, and a browser downloads only one of the pair. One file per game was nearly all of it - whiteout's music_loop.wav alone was 1,176,044 bytes.",
-    "OPEN: Korean webfonts are unevenly subset. whiteout ships NanumGothicCoding at 76 KB for two weights; lastwar ships NotoSansKR at 545 KB and champs 1.09 MB across two weights, both named .subset but evidently not subset to the glyphs used. whiteout proves ~40 KB per weight is achievable for the same job.",
-    "OPEN: champs PRELOADS its two 540 KB Korean fonts from index.html, so they are part of the first wait rather than a background cost. Its cold load is 1226 KB against 366-395 KB for the other four."
+    "DONE: audio was WAV (uncompressed PCM) at 855-1270 KB gzipped per game, larger than the Phaser engine. Re-encoded to Ogg/Opus with an AAC/m4a fallback: 4352 KB of WAV became 775 KB of Opus or 862 KB of AAC, and a browser downloads only one of the pair.",
+    "DONE (partial): champs no longer PRELOADS its two Korean weights. That dropped its cold load from 1226.8 KB to 158.6 KB - the first wait no longer carries 1.09 MB of typography. The faces still load via font-display: swap and are precached by the service worker, which installs in the background after load, so offline text does not fall back to a system face."
   ],
   "budgets": {
     "champs": {
@@ -63,5 +62,12 @@
       }
     }
   },
-  "_audioNote": "The audio figure counts BOTH shipped formats, so it OVERSTATES what a player pays by roughly half. That is deliberate: a ceiling that over-counts fails safe, where one that guessed which format a player gets could pass a real regression."
+  "_audioNote": "The audio figure counts BOTH shipped formats, so it OVERSTATES what a player pays by roughly half. That is deliberate: a ceiling that over-counts fails safe, where one that guessed which format a player gets could pass a real regression.",
+  "_blocked": {
+    "item": "Subsetting the Korean webfonts to the glyphs actually used.",
+    "size": "champs 1.09 MB across two NotoSansKR weights, lastwar 545 KB, kingshot Galmuri11 493 KB. whiteout does the same job with two NanumGothicCoding weights totalling 76 KB, so roughly 40 KB per weight is achievable and the others carry about 13x what they need.",
+    "why_blocked": "No subsetter is available on this host and installing one is not the agent's to do. Checked and absent: pyftsubset, hb-subset, fonttools and glyphhanger on PATH; fontTools in system python and in the crew venv; any subsetting or font-parsing package in node_modules or in any package.json.",
+    "needs_from_the_user": "Approval to install a font toolchain - python3 fonttools with brotli (giving pyftsubset), or the harfbuzz hb-subset binary.",
+    "deliberately_not_done": "Hand-rolling a woff2 parser. Font binary formats are exactly where an approximate implementation ships a subtly broken glyph table, and the saving does not justify that risk."
+  }
 }

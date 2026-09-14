@@ -16,20 +16,22 @@
       beside them. Paths are RELATIVE so they resolve under both the dev base
       ("/") and the Pages base ("/open-games/champs/").
     -->
-    <link
-      rel="preload"
-      href="./fonts/NotoSansKR-Regular.subset.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="./fonts/NotoSansKR-Bold.subset.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
+    <!--
+      Only the SMALL display faces are preloaded. The two Noto Sans KR weights are
+      539 KB and 555 KB, and preloading them made this game's cold load 1226 KB
+      against 366-395 KB for the other four - a metered-data player waited for 1.09
+      MB of typography before the game itself.
+
+      They are deliberately NOT preloaded now. The @font-face rules below already
+      use font-display: swap, so the text renders immediately in the fallback and
+      re-renders once the face arrives; preloading only bought a slightly earlier
+      swap while competing with the game bundle for the same scarce bandwidth. The
+      Cinzel faces stay because they are 17 KB each and carry the title's identity.
+
+      Subsetting these two properly is the real fix - whiteout does the same job
+      with 76 KB across two weights - but it needs a font toolchain that is not
+      installed here. See scripts/budget-baseline.json.
+    -->
     <link
       rel="preload"
       href="./fonts/Cinzel-SemiBold.subset.woff2"

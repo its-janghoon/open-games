@@ -67,7 +67,11 @@
       "game": "champs, lastwar, kingshot",
       "severity": "high",
       "what": "Korean webfonts are 476 KB to 1.09 MB per game where 76 KB does the same job.",
-      "measured_cause": "whiteout ships two NanumGothicCoding weights totalling 76 KB. lastwar ships one NotoSansKR weight at 557 KB, kingshot Galmuri11 at 504 KB, champs two NotoSansKR weights at 1.09 MB - the last named .subset but evidently not subset to the glyphs used. champs also PRELOADS both from index.html, making its cold load 1226 KB against 366-394 KB for the others."
+      "measured_cause": "whiteout ships two NanumGothicCoding weights totalling 76 KB. lastwar ships one NotoSansKR weight at 557 KB, kingshot Galmuri11 at 504 KB, champs two NotoSansKR weights at 1.09 MB - the last named .subset but evidently not subset to the glyphs used. champs also PRELOADS both from index.html, making its cold load 1226 KB against 366-394 KB for the others.",
+      "status": "PARTIAL - blocked on a package install",
+      "fix_so_far": "champs stopped preloading both Korean weights from index.html. Its cold load fell from 1226.8 KB to 158.6 KB, so a metered player no longer waits 1.09 MB before the game. The faces still arrive via font-display: swap and the service worker precaches them, since the worker installs in the background after load.",
+      "still_blocked": "Subsetting itself. No subsetter exists on this host - pyftsubset, hb-subset, fonttools, glyphhanger all absent from PATH, fontTools absent from both pythons, nothing in node_modules - and installing one needs the user. Hand-rolling a woff2 parser was rejected: font binaries are where an approximate implementation ships a subtly broken glyph table.",
+      "verified": "All four faces still report status 'loaded' in the browser and Korean renders correctly ('\uc544\ub808\ub098 \ucc54\ud53c\uc5b8\uc2a4'), so dropping the preload did not cost the typography."
     }
   ],
   "checked_and_clean": [
