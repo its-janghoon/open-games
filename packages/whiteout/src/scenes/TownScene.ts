@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { SceneKeys, PALETTE, CANVAS, RESOURCE_ORDER, type SceneKey } from '../config/GameConfig';
 import { TextureKeys, AudioKeys, BUILDING_TEXTURE_BY_KIND, RESOURCE_ICON_FRAME, SPARK_ICON_FRAME, MENU_ICON_FRAME } from '../config/AssetKeys';
 import { BUILDING_ORDER, buildingDef, isProducer, unlockRequirement } from '../config/BuildingConfig';
+import { BUILDING_LAYOUT } from '../config/TownLayout';
 import type { BuildingKind, ResourceKind } from '../types';
 import { currentObjective, type Objective, type ObjectiveView } from '../systems/ObjectiveSystem';
 import { AudioManager } from '../systems/AudioManager';
@@ -40,27 +41,6 @@ function signed(value: number): string {
   return whole > 0 ? `+${whole}` : String(whole);
 }
 
-/** Fixed layout position for each building sprite on the town map. */
-const BUILDING_LAYOUT: Record<BuildingKind, { x: number; y: number; scale: number }> = {
-  furnace: { x: 480, y: 250, scale: 2.0 },
-  hunters_hut: { x: 250, y: 300, scale: 1.8 },
-  sawmill: { x: 700, y: 300, scale: 1.8 },
-  coal_pit: { x: 170, y: 400, scale: 1.8 },
-  iron_mine: { x: 790, y: 400, scale: 1.8 },
-  war_camp: { x: 480, y: 420, scale: 1.9 },
-  // FEAT-002 expanded city. Positions are laid out for when the art feature
-  // adds their sprites; until a texture exists they are not rendered (the
-  // buildBuildings loop skips any kind without a registered texture).
-  shelter_row: { x: 330, y: 400, scale: 1.7 },
-  frost_vault: { x: 620, y: 400, scale: 1.7 },
-  forge_hall: { x: 380, y: 250, scale: 1.7 },
-  envoy_hall: { x: 580, y: 250, scale: 1.7 },
-  warming_ward: { x: 250, y: 470, scale: 1.6 },
-  ember_archive: { x: 710, y: 470, scale: 1.6 },
-  infantry_yard: { x: 400, y: 470, scale: 1.6 },
-  lancer_yard: { x: 480, y: 480, scale: 1.6 },
-  marksman_range: { x: 560, y: 470, scale: 1.6 },
-};
 
 /** Per-resource live widgets in the top bar. */
 interface ResourceWidget {
