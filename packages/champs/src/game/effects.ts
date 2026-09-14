@@ -29,6 +29,45 @@ export function createEffectState(): EffectState {
   return { shields: [], slows: [], armor: [], movement: [], pulls: [], burns: [] };
 }
 
+/**
+ * PURE readers. These resolve an effect against a timestamp without touching the state.
+ *
+ * The existing strongestSlow / strongestMovementBuff / activePull each call
+ * expireEffects first, so a QUERY mutates: asking what a unit's slow is deletes every
+ * effect that has expired. That is harmless while one code path asks once per frame, and
+ * it is a rollback hazard, because it makes state depend on the pattern of reads rather
+ * than only on inputs. Replaying a tick with a different number of queries - or the same
+ * queries in a different order relative to an expiry boundary - produces a different
+ * state, and the two players silently disagree.
+ *
+ * So expiry becomes a STEP that happens once per tick, and reading becomes a read. The
+ * mutating versions are kept for the paths that have not moved yet rather than changed
+ * underneath them.
+ */
+
+/** The strongest active slow at `now`, as a fraction. Does not mutate. */
+export function readSlow(state: EffectState, now: number): number {
+  return state.slows.reduce((value, effect) => (effect.expiresAt > now ? Math.max(value, effect.percent) : value), 0);
+}
+
+/** The strongest active movement buff at `now`, as a fraction. Does not mutate. */
+export function readMovementBuff(state: EffectState, now: number): number {
+  return state.movement.reduce((value, effect) => (effect.expiresAt > now ? Math.max(value, effect.percent) : value), 0);
+}
+
+/**
+ * The active pull at `now`, or undefined. Does not mutate.
+ *
+ * Ordering is the same as activePull's - soonest expiry first, then source id - and it is
+ * not cosmetic: with two pulls active the chosen one decides where the unit is dragged,
+ * so an unstable order would be a desync. The source-id tiebreak is what makes it total.
+ */
+export function readPull(state: EffectState, now: number): PullEffect | undefined {
+  return state.pulls
+    .filter((effect) => effect.expiresAt > now)
+    .sort((a, b) => a.expiresAt - b.expiresAt || a.source.localeCompare(b.source))[0];
+}
+
 export function expireEffects(state: EffectState, now: number): EffectState {
   state.shields = state.shields.filter((effect) => effect.expiresAt > now && effect.amount > 0);
   state.slows = state.slows.filter((effect) => effect.expiresAt > now);

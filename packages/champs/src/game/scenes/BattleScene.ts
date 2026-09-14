@@ -77,7 +77,6 @@ import {
 } from '../tutorial/config';
 import { audio } from '../audio';
 import {
-  activePull,
   applyArmor,
   applyBurn,
   applyDamageWithEffects,
@@ -88,8 +87,9 @@ import {
   cleanseSlows,
   createEffectState,
   expireEffects,
-  strongestMovementBuff,
-  strongestSlow,
+  readMovementBuff,
+  readPull,
+  readSlow,
   type EffectState,
 } from '../effects';
 
@@ -2277,8 +2277,10 @@ export default class BattleScene extends Phaser.Scene {
 
   private regenAndTick(dt: number) {
     for (const e of this.allEntities) {
+      // The single per-tick expiry. Everything else READS effects; see effects.ts for
+      // why a mutating query is a rollback hazard.
       expireEffects(e.effects, this.elapsed);
-      const pull = activePull(e.effects, this.elapsed);
+      const pull = readPull(e.effects, this.elapsed);
       if (pull && !e.unit.dead) {
         const pullDistance = distance(e.unit.pos, pull.destination);
         if (pullDistance > 1) {
@@ -3013,7 +3015,10 @@ export default class BattleScene extends Phaser.Scene {
     const d = distance(u.pos, goal);
     if (d < 1) return;
     const entity = this.entityForUnit(u);
-    if (entity && activePull(entity.effects, this.elapsed)) return;
+    // Pure reads. These used to be activePull/strongestSlow/strongestMovementBuff, each
+    // of which expired effects as a side effect - three mutating queries per unit per
+    // frame. Expiry now happens once per tick in advanceEffects(); see effects.ts.
+    if (entity && readPull(entity.effects, this.elapsed)) return;
     const smokeMultiplier = entity?.champion?.id === 'nightveil' &&
       (this.internalCooldowns.get(`nightveil-smoke:${u.id}`) ?? 0) > this.elapsed ? 1.2 : 1;
     const huntingBonus = entity?.champion?.id === 'grimtrail' && this.champions.some(
@@ -3031,8 +3036,8 @@ export default class BattleScene extends Phaser.Scene {
       {
         speedMultiplier: smokeMultiplier,
         flatBonus: huntingBonus,
-        buffFraction: effectState ? strongestMovementBuff(effectState, this.elapsed) : 0,
-        slowFactor: effectState ? strongestSlow(effectState, this.elapsed) : 0,
+        buffFraction: effectState ? readMovementBuff(effectState, this.elapsed) : 0,
+        slowFactor: effectState ? readSlow(effectState, this.elapsed) : 0,
       },
       {
         minX: OFF_X,

@@ -1,0 +1,43 @@
+{
+  "goal": {
+    "x": 1105.2,
+    "y": 871.2
+  },
+  "elapsedSeconds": 1.5007999999821187,
+  "before": {
+    "pos": {
+      "x": 205.2,
+      "y": 571.2
+    },
+    "moveSpeed": 66,
+    "attackCdRemaining": 0
+  },
+  "cdsBefore": {
+    "Q": 0,
+    "W": 0,
+    "E": 0,
+    "R": 0
+  },
+  "cdsAfter": {
+    "Q": 0,
+    "W": 0,
+    "E": 0,
+    "R": 0
+  },
+  "after": {
+    "pos": {
+      "x": 266.2477702295507,
+      "y": 591.5492567431863
+    },
+    "moveSpeed": 66,
+    "attackCdRemaining": 0
+  },
+  "context": {
+    "slowFactor": 0.35,
+    "buffFraction": 0,
+    "pinned": false,
+    "note": "a 0.35 slow was active for the whole window"
+  },
+  "liveSlowsRemaining": 1,
+  "_why": "A real capture from a live champs match with a 0.35 slow ACTIVE for the whole window. The earlier all-neutral capture could not detect an effects mistake, because every modifier was zero. Recapture over CDP when movement or effects change."
+}
