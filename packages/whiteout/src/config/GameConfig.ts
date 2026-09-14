@@ -281,7 +281,7 @@ export const WARMTH = {
    */
   COAL_FROM_FURNACE_LEVEL: 2,
   /**
-   * Survivors forage this much timber per second with no building at all.
+   * Timber survivors forage per second while the hold has NO timber producer.
    *
    * This is an ANTI-SOFTLOCK FLOOR, not an economy knob. Both starter producers
    * cost a resource the Furnace also burns - the Sawmill costs coal, the
@@ -289,11 +289,17 @@ export const WARMTH = {
    * zero coal and no producer, where every affordable action was gone and income
    * was nil. Nothing in the game could recover that; it was a dead save.
    *
-   * Kept deliberately tiny: the Sawmill produces 1.6/s, so once anything real is
-   * standing this is rounding error, but it guarantees the cheapest producer is
-   * always eventually affordable.
+   * It MUST exceed FUEL_PER_SECOND.wood, and that is the whole point of the
+   * number. A first attempt used 0.2/s against a 0.6/s burn, which is not a floor
+   * at all: a simulated ten-minute opening ended with timber pinned at 0.1 and
+   * the 40-timber Hunter's Hut permanently unaffordable, because the Furnace ate
+   * the trickle faster than it arrived. Only a surplus lets a stranded hold climb
+   * out, so warmthFloorIsAFloor() asserts the relationship and a test pins it.
+   *
+   * Scoped to holds with no Sawmill so it cannot distort the real economy: the
+   * Sawmill produces 1.6/s and this stops entirely once one is standing.
    */
-  BASELINE_FORAGE_WOOD_PER_SEC: 0.2,
+  BASELINE_FORAGE_WOOD_PER_SEC: 0.9,
   /**
    * Fractional reduction in fuel burn per Furnace level above 1 (e.g. 0.05 =
    * 5% cheaper per level). Clamped so burn never drops below FUEL_MIN_FACTOR of
@@ -320,6 +326,15 @@ export const WARMTH = {
  * Linearly interpolates from WARMTH.WARMTH_PRODUCTION_FLOOR at ratio 0 to 1.0
  * at ratio 1, so callers (WarmthSystem, tests, UI) share one curve definition.
  */
+/**
+ * The anti-softlock floor only works if it OUT-PACES the fuel burn it has to
+ * outrun. Exported so a test can pin the relationship rather than the number:
+ * lowering the floor below the burn silently restores the dead-end state.
+ */
+export function warmthFloorIsAFloor(): boolean {
+  return WARMTH.BASELINE_FORAGE_WOOD_PER_SEC > WARMTH.FUEL_PER_SECOND.wood;
+}
+
 export function warmthProductionMultiplier(warmthRatio: number): number {
   const ratio = Math.min(1, Math.max(0, warmthRatio));
   return WARMTH.WARMTH_PRODUCTION_FLOOR + (1 - WARMTH.WARMTH_PRODUCTION_FLOOR) * ratio;

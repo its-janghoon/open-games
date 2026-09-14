@@ -208,11 +208,15 @@ export class BuildingSystem {
       if (level <= 0 || !def.produces) continue;
       rates[def.produces] += outputPerSec(kind, level);
     }
-    // Survivors forage a trickle of timber even with nothing built. This is the
+    // Survivors forage timber while the hold has NO timber producer. This is the
     // anti-softlock floor described on WARMTH.BASELINE_FORAGE_WOOD_PER_SEC: both
     // starter producers cost a resource the Furnace burns, so without it a hold
     // could strand itself with no affordable action and no income at all.
-    rates.wood += WARMTH.BASELINE_FORAGE_WOOD_PER_SEC;
+    //
+    // Conditional so it cannot distort the real economy - it stops the moment a
+    // Sawmill stands - and set above the Furnace's timber burn, because a floor
+    // smaller than the burn is not a floor: the trickle is eaten as it arrives.
+    if (rates.wood <= 0) rates.wood += WARMTH.BASELINE_FORAGE_WOOD_PER_SEC;
     return rates;
   }
 

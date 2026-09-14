@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BuildingSystem } from './BuildingSystem';
 import { ResourceStore } from './ResourceStore';
-import { WARMTH } from '../config/GameConfig';
+import { WARMTH, warmthFloorIsAFloor } from '../config/GameConfig';
 import {
   BUILDING_ORDER,
   buildingDef,
@@ -96,12 +96,9 @@ describe('BuildingSystem', () => {
     ]);
     const rates = bs.productionRates();
     expect(rates.food).toBeCloseTo(outputPerSec('hunters_hut', 2), 5);
-    // Building output PLUS the baseline forage floor, which is credited with or
-    // without a Sawmill (see WARMTH.BASELINE_FORAGE_WOOD_PER_SEC).
-    expect(rates.wood).toBeCloseTo(
-      outputPerSec('sawmill', 1) + WARMTH.BASELINE_FORAGE_WOOD_PER_SEC,
-      5,
-    );
+    // A Sawmill is standing, so the forage floor is NOT credited: it exists only
+    // to rescue a hold with no timber producer at all.
+    expect(rates.wood).toBeCloseTo(outputPerSec('sawmill', 1), 5);
     expect(rates.coal).toBe(0);
     // Higher hunters' hut level produces strictly more food.
     expect(outputPerSec('hunters_hut', 2)).toBeGreaterThan(outputPerSec('hunters_hut', 1));
@@ -128,6 +125,14 @@ describe('BuildingSystem', () => {
     for (const k of originals) expect(BUILDING_ORDER).toContain(k);
     // Every new building has a hard Furnace prerequisite of at least 1.
     for (const k of added) expect(buildingDef(k).requiresFurnaceLevel).toBeGreaterThanOrEqual(1);
+  });
+
+  it('forages faster than the Furnace burns, or it is not a floor', () => {
+    // A floor smaller than the burn is eaten as it arrives. The first attempt
+    // used 0.2/s against a 0.6/s burn and a simulated opening ended with timber
+    // pinned at 0.1 and the 40-timber Hunter's Hut permanently unaffordable.
+    expect(warmthFloorIsAFloor()).toBe(true);
+    expect(WARMTH.BASELINE_FORAGE_WOOD_PER_SEC).toBeGreaterThan(WARMTH.FUEL_PER_SECOND.wood);
   });
 
   it('a hold with nothing built still earns its way to a producer', () => {
