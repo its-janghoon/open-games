@@ -7,7 +7,13 @@ import {
   TICK_SECONDS,
   type ChampsInput,
 } from './champsSimulation';
-import { advanceEffects, drainDueImpacts, queueImpact, type WorldState } from './worldStep';
+import {
+  advanceEffects,
+  cloneWorldState,
+  drainDueImpacts,
+  queueImpact,
+  type WorldState,
+} from './worldStep';
 import { createEffectState } from './effects';
 import { createChampionLifeState } from './championLifeState';
 
@@ -36,6 +42,34 @@ function runStraightThrough(
 }
 
 describe('champs world under rollback', () => {
+  /**
+   * What this suite can and cannot prove, stated because I established the boundary the hard way
+   * by injecting bugs and watching them walk through.
+   *
+   * It validates the ROLLBACK MACHINERY over this state: that a rewind restores enough, that a
+   * replay reaches the same place as a clean run of the same inputs, that the insertion counter
+   * and the impact queue survive. Those are real and each is injection-checked.
+   *
+   * It CANNOT validate the step's own correctness. The reference run and the session call the
+   * same `step`, so an error inside it — a reordered subsystem, wrong arithmetic — changes both
+   * sides identically and every assertion still passes. Measured: moving the impact drain to
+   * before the clock advance fails nothing here. That job belongs to the differential in
+   * scripts/diff-world-step.mjs, which compares the step against the live scene instead of
+   * against itself.
+   */
+  it('step does not mutate the state it was given', () => {
+    // Direct, because the equality test cannot see this either: if step mutates and returns the
+    // same object, the reference loop reassigns that object and stays numerically right, so both
+    // sides agree. Only the snapshot contract is broken, and this is what notices.
+    const sim = createChampsSimulation(PARTICIPANTS);
+    const before = sim.initial();
+    const untouched = cloneWorldState(before);
+
+    sim.step(before, new Map([['p1', { moveTo: { x: 900, y: 900 }, cast: true }]]), 1);
+
+    expect(before).toEqual(untouched);
+  });
+
   it('a resimulation after a late MOVEMENT input matches the straight-through run', () => {
     // The half that holds today. Movement, the clock, life phases and the insertion counter all
     // survive a rewind and replay; this is the regression guard for that, kept separate from
@@ -72,66 +106,114 @@ describe('champs world under rollback', () => {
   });
 
   /**
-   * KNOWN FAILURE, deliberately executable.
+   * The combat equality test — and a correction of what the previous commit claimed.
    *
-   * `it.fails` asserts this test DOES fail, so the gate stays green while the defect stays
-   * visible - and the moment someone fixes it, this line starts failing and forces an update.
-   * That is the opposite of skipping it, which would let the problem rot silently.
+   * That commit recorded a combat DESYNC here as `it.fails`, honestly noting I did not know
+   * whether the fault was the adapter, WorldState, or the harness. It was the harness, and more
+   * precisely the harness's PREMISE. There is no desync.
    *
-   * What is measured: with both champions FIRING, a resimulation after a late input does not
-   * match the straight-through run. Positions agree to fifteen decimal places and both runs
-   * kill p2 on the same tick, so movement, the clock and the life phases are all right. Only
-   * damage diverges - the reference leaves p1 on 2 hp having queued about fifty shots, the
-   * replay leaves it on 554 having queued twenty-one.
+   * What was wrong: the session got p2's input for tick 5 and nothing after it, then was compared
+   * at tick 30 against a reference that persisted that input forward for 25 further ticks. Those
+   * are two different input streams. The core replays an unconfirmed tick with the prediction it
+   * originally used (`real ?? previouslyUsed`), which for p2 was idle — so of course fewer shots
+   * were fired. I was comparing a prediction against the truth and calling the gap a bug.
    *
-   * What is NOT yet known is which of three things is wrong, and I am not guessing: the
-   * adapter may queue shots from predicted inputs that a confirmed input should have replaced,
-   * WorldState may still be missing state the queue depends on, or this harness may be driving
-   * the session wrongly - the first diagnostic I wrote for it was invalid, because advanceTo
-   * cannot go backwards and so it sampled one late state thirty times.
+   * A session's state is only comparable to a straight-through run up to the last CONFIRMED tick,
+   * the last tick where every participant's real input is known. So this test confirms every tick
+   * and withholds exactly one, which is what forces a genuine rollback.
    *
-   * Note what this already establishes, though: the same scenario with movement only PASSES,
-   * and it passed just as happily with the impact drain deliberately moved before the clock.
-   * A rollback test with no combat in it proves almost nothing about combat.
+   * It also explains what I could not account for at the time: why the movement-only version
+   * passed while the firing version failed. A move goal is STICKY state, held in moveGoals, so an
+   * idle prediction still walks the champion to the same place. A cast is per-tick, so an idle
+   * prediction fires nothing. The movement test was passing for a reason unrelated to rollback
+   * being correct.
    */
-  it.fails('a resimulation with both champions firing matches the straight-through run', () => {
-    // The real verdict on whether WorldState is complete enough to roll back. p2's order for
-    // tick 5 does not arrive until tick 20, so the session predicted 15 ticks wrong and has to
-    // rewind and replay them.
-    const lateTick = 5;
-    const p2Order: ChampsInput = { moveTo: { x: 500, y: 500 }, cast: true };
+  it('a forced resimulation with both champions firing matches the straight-through run', () => {
+    const LATE = 5;
+    const TICKS = 30;
     const p1Order: ChampsInput = { moveTo: { x: 50, y: 100 }, cast: true };
-
-    const schedule = new Map<number, Map<string, ChampsInput>>([
-      [0, new Map([['p1', p1Order]])],
-      [lateTick, new Map([['p2', p2Order]])],
-    ]);
-    const expected = runStraightThrough(schedule, 30);
+    const p2Order: ChampsInput = { moveTo: { x: 500, y: 500 }, cast: true };
+    // Deliberately different on the late tick so repeat-last MISPREDICTS it. Without that the
+    // prediction is accidentally right and the core correctly does no work — a real property,
+    // pinned separately, but not a rollback.
+    const p2Late: ChampsInput = { moveTo: { x: 120, y: 40 }, cast: false };
+    const p2At = (tick: number) => (tick === LATE ? p2Late : p2Order);
 
     const sim = createChampsSimulation(PARTICIPANTS);
-    const session = new RollbackSession(sim, { participants: PARTICIPANTS });
+    let expected = sim.initial();
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      expected = sim.step(
+        expected,
+        new Map([
+          ['p1', p1Order],
+          ['p2', p2At(tick)],
+        ]),
+        tick + 1,
+      );
+    }
 
-    session.setLocalInput('p1', p1Order);
-    session.advanceTo(20);
+    const session = new RollbackSession(createChampsSimulation(PARTICIPANTS), {
+      participants: PARTICIPANTS,
+      maxRollbackTicks: 120,
+    });
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      session.setLocalInput('p1', p1Order);
+      if (tick !== LATE) session.applyRemoteInput('p2', tick, p2At(tick));
+      session.advanceTo(tick + 1);
+    }
 
-    const result = session.applyRemoteInput('p2', lateTick, p2Order);
-    expect(result.accepted, result.rejection ?? 'should accept').toBe(true);
-    expect(result.resimulated, 'a late input that changes a prediction must force a replay')
-      .toBeGreaterThan(0);
+    const late = session.applyRemoteInput('p2', LATE, p2Late);
+    expect(late.accepted, late.rejection ?? 'should accept').toBe(true);
+    expect(late.resimulated, 'a mispredicted input must force a real replay').toBeGreaterThan(0);
 
-    session.advanceTo(30);
     const actual = session.peek();
-
     expect(
       actual.units.map((u) => ({ id: u.id, x: u.pos.x, y: u.pos.y, hp: u.hp, dead: u.dead })),
     ).toEqual(
       expected.units.map((u) => ({ id: u.id, x: u.pos.x, y: u.pos.y, hp: u.hp, dead: u.dead })),
     );
-    expect(expected.nextInsertionOrder, 'the scenario must actually fire shots').toBeGreaterThan(0);
-    expect(actual.simTime).toBeCloseTo(expected.simTime, 9);
-    expect(actual.lives).toEqual(expected.lives);
     expect(actual.pendingImpacts).toEqual(expected.pendingImpacts);
     expect(actual.nextInsertionOrder).toBe(expected.nextInsertionOrder);
+    expect(actual.lives).toEqual(expected.lives);
+    expect(
+      expected.nextInsertionOrder,
+      'the scenario must actually fire, or it proves nothing about the queue',
+    ).toBeGreaterThan(0);
+  });
+
+  it('leaves an unconfirmed tail on the predictions it already used, which is not a desync', () => {
+    // Pinned so the previous commit's mistake cannot be re-made — and the ORDER here is the
+    // mechanism, which my first attempt at this test got wrong. Delivering p2's input before
+    // those ticks are simulated makes the prediction repeat-last, so p2 fires every tick and
+    // nothing diverges. The idle reuse only happens when the ticks were ALREADY simulated while
+    // p2 had no last-known input at all: those idle predictions are recorded as used, and the
+    // replay reuses them rather than re-deriving better ones.
+    const session = new RollbackSession(createChampsSimulation(PARTICIPANTS), {
+      participants: PARTICIPANTS,
+      maxRollbackTicks: 120,
+    });
+    const firing: ChampsInput = { moveTo: { x: 500, y: 500 }, cast: true };
+
+    // Simulate 20 ticks knowing nothing about p2 — every tick predicts idle.
+    session.advanceTo(20);
+    expect(session.peek().nextInsertionOrder, 'nobody has fired yet').toBe(0);
+
+    // Now p2's tick-5 input arrives. Only tick 5 becomes real; 6..19 reuse the idle predictions.
+    const late = session.applyRemoteInput('p2', 5, firing);
+    expect(late.accepted).toBe(true);
+    const withReusedPredictions = session.peek().nextInsertionOrder;
+
+    const sim = createChampsSimulation(PARTICIPANTS);
+    let persisted = sim.initial();
+    for (let tick = 0; tick < 20; tick += 1) {
+      persisted = sim.step(persisted, new Map(tick >= 5 ? [['p2', firing]] : []), tick + 1);
+    }
+
+    expect(withReusedPredictions, 'exactly the one confirmed tick fired').toBe(1);
+    expect(
+      persisted.nextInsertionOrder,
+      'input persistence fires every tick from 5; reused idle predictions fire once',
+    ).toBeGreaterThan(withReusedPredictions);
   });
 
   it('an input that matches the prediction needs no replay', () => {
