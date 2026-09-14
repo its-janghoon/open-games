@@ -191,13 +191,30 @@ if (process.argv.includes('--update')) {
       byClass: Object.fromEntries(Object.entries(m.byClass).map(([k, v]) => [k, ceilingFor(v)])),
     };
   }
+
+  /**
+   * MERGE into whatever is on disk. Do not rewrite the document.
+   *
+   * This used to build a fresh object from a template literal in this file and write it over the
+   * baseline, and that is destructive in a way that is easy to miss because the ceilings - the part
+   * you are looking at - come out right. Running it to register one new game reverted every prose
+   * field to the text hardcoded here: the _knownWins entries lost their "DONE" updates and went back
+   * to describing problems that had since been fixed, and the entire _blocked section documenting
+   * the font-subsetting blocker, including what the user would need to approve, was deleted outright.
+   *
+   * The prose in this file is now only a SEED for a baseline that does not exist yet. Anything
+   * already on disk wins, because it was written by someone who knew something this script does not.
+   */
+  const existing = existsSync(BASELINE) ? JSON.parse(readFileSync(BASELINE, 'utf8')) : {};
   const doc = {
+    ...existing,
     _why:
+      existing._why ??
       'Gzipped transfer ceilings per game. The mission is that these games are ' +
-      'reachable on metered data, so bytes need something that refuses them. ' +
-      'Ceilings are measured-today plus ~8% headroom, deliberately not an ' +
-      'aspiration: a budget nobody can meet gets raised until it means nothing.',
-    _knownWins: [
+        'reachable on metered data, so bytes need something that refuses them. ' +
+        'Ceilings are measured-today plus ~8% headroom, deliberately not an ' +
+        'aspiration: a budget nobody can meet gets raised until it means nothing.',
+    _knownWins: existing._knownWins ?? [
       'Audio ships as WAV (uncompressed PCM), 850-1265 KB gzipped per game - ' +
         'larger than the Phaser engine itself. Ogg/Opus would cut this by roughly ' +
         'an order of magnitude and is the single biggest available saving.',
@@ -208,7 +225,7 @@ if (process.argv.includes('--update')) {
       'champs PRELOADS its two 540 KB Korean fonts from index.html, so they are ' +
         'part of the first wait rather than a background cost.',
     ],
-    budgets,
+    budgets: { ...(existing.budgets ?? {}), ...budgets },
   };
   writeFileSync(BASELINE, `${JSON.stringify(doc, null, 2)}\n`);
   console.log(`check:budget ceilings written for ${measured.length} game(s).`);

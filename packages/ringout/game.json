@@ -1,0 +1,15 @@
+{
+  "slug": "ringout",
+  "title": "Ringout",
+  "titleKo": "\ub9c1\uc544\uc6c3",
+  "genre": "Two-player Geometric Fighter",
+  "summary": "A two-body fighter drawn entirely from geometric parts, with no sprite sheets and no animation frames \u2014 every pose is computed. Built to be rolled back, so two people on the same network can fight with no server between them.",
+  "summaryKo": "\uc2a4\ud504\ub77c\uc774\ud2b8 \uc2dc\ud2b8\ub3c4 \uc560\ub2c8\uba54\uc774\uc158 \ud504\ub808\uc784\ub3c4 \uc5c6\uc774, \ub3c4\ud615 \ubd80\ud488\ub9cc\uc73c\ub85c \uadf8\ub824\uc9c0\ub294 2\uc778 \uaca9\ud22c. \ubaa8\ub4e0 \uc790\uc138\ub294 \uacc4\uc0b0\ub429\ub2c8\ub2e4. \ub864\ubc31\uc744 \uc804\uc81c\ub85c \ub9cc\ub4e4\uc5b4 \uac19\uc740 \ub124\ud2b8\uc6cc\ud06c\uc758 \ub450 \uc0ac\ub78c\uc774 \uc11c\ubc84 \uc5c6\uc774 \uaca8\ub8f0 \uc218 \uc788\uc2b5\ub2c8\ub2e4.",
+  "stack": [
+    "typescript",
+    "phaser3"
+  ],
+  "status": "wip",
+  "focus": "active",
+  "focusNote": "Phase 6: the rollback core's first complete WorldState \u2014 a fighter's whole world is two bodies and a hitbox set."
+}

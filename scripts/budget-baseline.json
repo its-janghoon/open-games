@@ -6,37 +6,37 @@
   ],
   "budgets": {
     "champs": {
-      "coldLoad": 1356783,
-      "total": 1826019,
+      "coldLoad": 181618,
+      "total": 1829921,
       "byClass": {
-        "js": 522012,
+        "js": 525439,
         "css": 30752,
         "image": 77504,
         "font": 1218599,
         "other": 18695,
-        "html": 17667
+        "html": 18106
       }
     },
     "kingshot": {
       "coldLoad": 418539,
-      "total": 1529407,
+      "total": 1529426,
       "byClass": {
         "audio": 475553,
         "image": 99337,
-        "js": 416478,
+        "js": 416497,
         "font": 545115,
         "html": 18858
       }
     },
     "lastwar": {
       "coldLoad": 428070,
-      "total": 1467007,
+      "total": 1467039,
       "byClass": {
         "audio": 382878,
         "image": 62800,
         "font": 602415,
         "other": 18356,
-        "js": 425639,
+        "js": 425670,
         "html": 19917
       }
     },
@@ -59,6 +59,14 @@
         "image": 54966,
         "js": 404866,
         "html": 17719
+      }
+    },
+    "ringout": {
+      "coldLoad": 365977,
+      "total": 367362,
+      "byClass": {
+        "js": 366378,
+        "html": 17295
       }
     }
   },
