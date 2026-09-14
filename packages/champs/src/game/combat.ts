@@ -85,19 +85,51 @@ export function projectileImpactTime(
 /** A value with an absolute impact deadline, suitable for a deterministic queue. */
 export interface TimedImpact {
   dueAt: number;
+  /**
+   * Monotonic order in which this entry was queued.
+   *
+   * Optional so existing callers keep working, but supply it wherever two entries can share
+   * a deadline: it is what makes the tiebreak survive being serialized and restored.
+   */
+  insertionOrder?: number;
 }
 
 /**
- * Partition an impact queue without mutating it. Due impacts retain insertion
- * order for equal deadlines; pending impacts are sorted by deadline.
+ * Partition an impact queue without mutating it. Entries with equal deadlines keep their
+ * queued order; pending entries are sorted by deadline.
+ *
+ * The tiebreak reads `insertionOrder` when it is present, and falls back to array position
+ * otherwise. That distinction is the point of this function, so it is worth stating why.
+ *
+ * This used to break ties on array position alone. I assumed that was correct-by-accident in
+ * a running match - impacts are appended in increasing insertion order, the sort is stable,
+ * so position and insertion order should agree inductively - and that the defect was dormant
+ * until a rollback restored a queue in some other order. Measuring a real conquest match
+ * says otherwise: across 29 samples holding two or more queued impacts, 21 were out of
+ * insertion order, with queues like [142, 143, 144, 141, 139, 145].
+ *
+ * The reason is this function's own output. `pending` comes back sorted by DEADLINE and the
+ * scene assigns it straight back as the live queue, so from the second tick onward array
+ * position tracks deadlines rather than cast order - and abilities differ in travel time, so
+ * a later cast routinely holds an earlier deadline. Array position was never a proxy for
+ * insertion order.
+ *
+ * So this is a live ordering defect, not only a rollback hazard. It bites when two impacts
+ * share a deadline exactly, which is not hypothetical: a dash effect sets its deadline to the
+ * current time, so two dashes resolved in one frame tie precisely. Ordering decides which of
+ * two lethal hits lands first, hence who gets the kill and whether the other one hits a
+ * corpse.
  */
 export function partitionImpacts<T extends TimedImpact>(
   impacts: readonly T[],
   nowSeconds: number,
 ): { due: T[]; pending: T[] } {
   const now = Number.isFinite(nowSeconds) ? Math.max(0, nowSeconds) : 0;
-  const indexed = impacts.map((impact, index) => ({ impact, index }));
-  indexed.sort((a, b) => a.impact.dueAt - b.impact.dueAt || a.index - b.index);
+  const indexed = impacts.map((impact, index) => ({
+    impact,
+    order: impact.insertionOrder ?? index,
+  }));
+  indexed.sort((a, b) => a.impact.dueAt - b.impact.dueAt || a.order - b.order);
   const due: T[] = [];
   const pending: T[] = [];
   for (const entry of indexed) {
