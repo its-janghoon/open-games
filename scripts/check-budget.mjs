@@ -171,7 +171,7 @@ function selftest() {
     problems += 1;
   }
 
-  if (problems === 0) console.log('  selftest: classifier, byte counting and ceiling arithmetic OK');
+  if (problems === 0) console.error('  selftest: classifier, byte counting and ceiling arithmetic OK');
   return problems;
 }
 

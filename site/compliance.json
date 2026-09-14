@@ -1,0 +1,139 @@
+{
+  "generated": "2026-09-14",
+  "generatedBy": "scripts/gen-compliance.mjs",
+  "howToReproduce": "npm run build — every claim below is a gate the build already runs.",
+  "summary": {
+    "claims": 5,
+    "passing": 5,
+    "thirdPartyRequests": 0,
+    "paymentIntegrations": 0,
+    "games": 5
+  },
+  "claims": [
+    {
+      "id": "no-third-party-requests",
+      "promise": "The games contact nobody. No font CDN, no analytics, no ad call.",
+      "checkedBy": "check:network, on the BUILT bundles - a dependency can emit a request the source never shows.",
+      "verdict": "pass",
+      "measured": "312 built files scanned, 0 third-party request(s) found.",
+      "findings": [],
+      "note": "An <a href> to the project’s own repository is not counted: it fetches nothing until a reader chooses to follow it. Counting those would have reported 13 violations where the honest number is zero."
+    },
+    {
+      "id": "no-payment-code",
+      "promise": "The games cannot take money. There is no purchase path to hide.",
+      "checkedBy": "check:payments, matching processor hosts and SDK call shapes rather than payment words.",
+      "verdict": "pass",
+      "measured": "312 built files scanned, 0 payment integration(s) found.",
+      "findings": [],
+      "note": "The word “purchase” appears 40 times in these bundles and every one is gameplay - Arena Champions is a MOBA with an in-match item shop. A gate matching words would report 40 violations against an honest zero, so it matches integrations instead."
+    },
+    {
+      "id": "self-hosted",
+      "promise": "Every asset a game loads comes from the game itself.",
+      "checkedBy": "check:selfhosted, resolving every asset path a bundle names against what shipped.",
+      "verdict": "pass",
+      "measured": "230 asset paths across 5 games, 0 missing or cross-origin.",
+      "findings": []
+    },
+    {
+      "id": "transfer-budget",
+      "promise": "The games stay small enough for a metered connection, and cannot quietly grow.",
+      "checkedBy": "check:budget, gzipped bytes per game per asset class against committed ceilings.",
+      "verdict": "pass",
+      "measured": "First wait 158.6–394.9 KB; full download 781.4–1651.6 KB.",
+      "games": [
+        {
+          "slug": "champs",
+          "firstWaitKB": 158.6,
+          "totalKB": 1651.6,
+          "byClassKB": {
+            "font": 1101.9,
+            "js": 472,
+            "image": 59.7,
+            "css": 14,
+            "other": 2.3,
+            "html": 1.7
+          }
+        },
+        {
+          "slug": "kingshot",
+          "firstWaitKB": 378.5,
+          "totalKB": 1382.9,
+          "byClassKB": {
+            "font": 492.9,
+            "audio": 430,
+            "js": 376.6,
+            "image": 81,
+            "html": 2.4
+          }
+        },
+        {
+          "slug": "lastwar",
+          "firstWaitKB": 387.1,
+          "totalKB": 1326.5,
+          "byClassKB": {
+            "font": 544.7,
+            "js": 384.9,
+            "audio": 346.2,
+            "image": 45.3,
+            "html": 3.5,
+            "other": 1.9
+          }
+        },
+        {
+          "slug": "whiteout",
+          "firstWaitKB": 394.9,
+          "totalKB": 1213.4,
+          "byClassKB": {
+            "audio": 484.4,
+            "js": 394.2,
+            "image": 258.5,
+            "font": 74.6,
+            "html": 1.7
+          }
+        },
+        {
+          "slug": "wirework",
+          "firstWaitKB": 366.7,
+          "totalKB": 781.4,
+          "byClassKB": {
+            "audio": 376.4,
+            "js": 366.1,
+            "image": 37.7,
+            "html": 1.3
+          }
+        }
+      ],
+      "note": "The audio figure counts both shipped formats though a browser downloads only one, so it overstates what a player pays. A ceiling that over-counts fails safe."
+    },
+    {
+      "id": "works-offline",
+      "promise": "A game that has been opened once keeps working with no network.",
+      "checkedBy": "A real browser driven over the DevTools protocol with the network denied, not an assertion. Re-runnable: scripts/lib/offline-probe.py.",
+      "verdict": "pass",
+      "measured": "window.__GAME__ present, game.isRunning true, TitleScene active, and the real menu rendered - not the browser's error page. Games probed: whiteout, wirework.",
+      "method": "Chrome DevTools Protocol (playwright is not installed on the build host): load the built game from a local static server, warm the cache, set Network.emulateNetworkConditions offline=true, reload, and read window.__GAME__ and the active scene list. Probe committed at scripts/lib/offline-probe.py.",
+      "notYetMeasured": [
+        "kingshot, lastwar and champs have generated workers from the same script but were not probed; only whiteout and wirework were.",
+        "Deep offline play - reaching a scene whose sprites were never fetched while online. Those are runtime-cached on first use, so an asset never touched while online is still unavailable offline by design.",
+        "The probe is a maintainer tool, not part of `npm run build`: it needs a live browser, so the build gates the precondition (check:selfhosted) rather than the boot."
+      ]
+    }
+  ],
+  "openWork": [
+    {
+      "item": "Subsetting the Korean webfonts to the glyphs actually used.",
+      "size": "champs 1.09 MB across two NotoSansKR weights, lastwar 545 KB, kingshot Galmuri11 493 KB. whiteout does the same job with two NanumGothicCoding weights totalling 76 KB, so roughly 40 KB per weight is achievable and the others carry about 13x what they need.",
+      "why": "No subsetter is available on this host and installing one is not the agent's to do. Checked and absent: pyftsubset, hb-subset, fonttools and glyphhanger on PATH; fontTools in system python and in the crew venv; any subsetting or font-parsing package in node_modules or in any package.json.",
+      "needs": "Approval to install a font toolchain - python3 fonttools with brotli (giving pyftsubset), or the harfbuzz hb-subset binary."
+    }
+  ],
+  "funding": {
+    "serverCost": "Zero. The games are static files; multiplayer is peer-to-peer or local-network, so there is no backend to run.",
+    "whatIsAskedFor": "Sponsorship and portal revenue share, so the games can stay free with no purchases and no advertising.",
+    "whatIsNotTaken": "In-app purchases, advertising, telemetry, and any third-party runtime request.",
+    "terms": "Not settled. Talk to us rather than reading a number here that nobody has agreed."
+  },
+  "licence": "Apache-2.0. Every game, asset and gate in this report is in the public repository."
+}

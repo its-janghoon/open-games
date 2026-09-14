@@ -87,7 +87,7 @@ function selftest() {
     console.error('  selftest refs: leading ./ should be normalised away');
     problems += 1;
   }
-  if (problems === 0) console.log('  selftest: asset-literal extraction OK (local, remote, non-assets ignored)');
+  if (problems === 0) console.error('  selftest: asset-literal extraction OK (local, remote, non-assets ignored)');
   return problems;
 }
 

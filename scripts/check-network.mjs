@@ -88,7 +88,7 @@ function selftest() {
       );
       problems += 1;
     } else {
-      console.log(`  selftest ${name}: ${found.length} caught, none leaked`);
+      console.error(`  selftest ${name}: ${found.length} caught, none leaked`);
     }
     for (const needle of spec.forbid) {
       // Checked against the matched TARGET only. An earlier version compared a

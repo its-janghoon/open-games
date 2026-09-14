@@ -95,7 +95,7 @@ function selftest() {
     );
     problems += 1;
   } else {
-    console.log(`  selftest html: ${htmlHits.length} integration(s) caught`);
+    console.error(`  selftest html: ${htmlHits.length} integration(s) caught`);
   }
 
   const jsHits = scanPaymentCode(MUST_TRIP.js, 'selftest.js');
@@ -106,7 +106,7 @@ function selftest() {
     );
     problems += 1;
   } else {
-    console.log(`  selftest js: ${jsHits.length} integration(s) caught`);
+    console.error(`  selftest js: ${jsHits.length} integration(s) caught`);
   }
 
   const cardHits = scanPaymentCode(MUST_TRIP.cardHtml, 'selftest-card.html');
@@ -114,7 +114,7 @@ function selftest() {
     console.error(`  selftest card fields: expected ${MUST_TRIP.cardExpect}, got ${cardHits.length}`);
     problems += 1;
   } else {
-    console.log(`  selftest card fields: ${cardHits.length} caught`);
+    console.error(`  selftest card fields: ${cardHits.length} caught`);
   }
 
   const falseJs = scanPaymentCode(MUST_NOT_TRIP.js, 'gameplay.js');
@@ -124,7 +124,7 @@ function selftest() {
     for (const f of leaked) console.error(`  selftest: FALSE POSITIVE ${f.kind} on '${f.target}'`);
     problems += 1;
   } else {
-    console.log('  selftest gameplay: in-match shop vocabulary correctly ignored');
+    console.error('  selftest gameplay: in-match shop vocabulary correctly ignored');
   }
 
   return problems;
