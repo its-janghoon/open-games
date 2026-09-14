@@ -170,7 +170,7 @@ import {
   createProgress,
   addGold,
   addXp,
-  passiveGold,
+  advanceGold,
   minionBounty,
   structureBounty,
   CHAMPION_TAKEDOWN_BOUNTY,
@@ -2044,26 +2044,40 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private tickEconomy(dt: number) {
-    this.goldAccrual += passiveGold(dt);
-    if (this.goldAccrual >= 1) {
-      const whole = Math.floor(this.goldAccrual);
-      addGold(this.playerProgress, whole);
-      this.playerTotalGoldEarned += whole;
-      this.teamFacts.ally.totalGoldEarned += whole;
-      this.goldAccrual -= whole;
-    }
+    /**
+     * Both branches below now call the SAME extracted step, which is the point of the extraction.
+     *
+     * This method previously held the accumulate/floor/carry arithmetic twice — once for the player and once inside
+     * the bot loop — so the rollback state and the scene could disagree in two places independently. The scene keeps
+     * its own storage (`goldAccrual` beside `playerProgress`, and the bot's own fields) because BattleScene is still
+     * the authority for a real match; what it no longer keeps is its own copy of the maths.
+     */
+    const player = advanceGold(
+      {
+        gold: this.playerProgress.gold,
+        accrual: this.goldAccrual,
+        totalEarned: this.playerTotalGoldEarned,
+      },
+      dt,
+    );
+    const playerGained = player.totalEarned - this.playerTotalGoldEarned;
+    this.playerProgress.gold = player.gold;
+    this.goldAccrual = player.accrual;
+    this.playerTotalGoldEarned = player.totalEarned;
+    this.teamFacts.ally.totalGoldEarned += playerGained;
 
     for (const entity of this.champions) {
       const bot = entity.bot;
       if (!bot) continue;
-      bot.goldAccrual += passiveGold(dt);
-      if (bot.goldAccrual >= 1) {
-        const whole = Math.floor(bot.goldAccrual);
-        addGold(bot.progress, whole);
-        bot.totalGoldEarned += whole;
-        this.teamFacts[bot.side].totalGoldEarned += whole;
-        bot.goldAccrual -= whole;
-      }
+      const advanced = advanceGold(
+        { gold: bot.progress.gold, accrual: bot.goldAccrual, totalEarned: bot.totalGoldEarned },
+        dt,
+      );
+      const gained = advanced.totalEarned - bot.totalGoldEarned;
+      bot.progress.gold = advanced.gold;
+      bot.goldAccrual = advanced.accrual;
+      bot.totalGoldEarned = advanced.totalEarned;
+      this.teamFacts[bot.side].totalGoldEarned += gained;
       if (!this.inBase(entity.unit, bot.side) || !isChampionPresent(entity.life!)) continue;
       const item = recommendPurchase(bot.champion.role, bot.progress.gold, bot.ownedItems);
       if (!item) continue;

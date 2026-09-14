@@ -55,6 +55,7 @@ describe('advanceLives against a real match', () => {
       lives: { a: { phase: 'dead', diedAt: 0, respawnsAt: RESPAWN_DELAY, invulnerableUntil: null } },
       pendingImpacts: [],
       nextInsertionOrder: 0,
+      economy: {},
       moveGoals: {},
     };
 
@@ -87,6 +88,7 @@ describe('advanceLives against a real match', () => {
       lives: { a: { phase: 'dead', diedAt: 0, respawnsAt: RESPAWN_DELAY, invulnerableUntil: null } },
       pendingImpacts: [],
       nextInsertionOrder: 0,
+      economy: {},
       moveGoals: {},
     });
 

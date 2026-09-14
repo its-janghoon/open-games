@@ -104,6 +104,46 @@ export function passiveGold(seconds: number): number {
   return seconds > 0 ? PASSIVE_GOLD_PER_SECOND * seconds : 0;
 }
 
+/**
+ * One participant's passive gold, as snapshot state.
+ *
+ * `accrual` is the reason this type exists. The trickle is 2.04 gold per second against a 1/30 s tick, so a tick
+ * earns 0.068 gold and whole gold only lands every fifteenth one; the remainder has to be carried. That carry is
+ * the most rollback-fragile shape there is — restore `gold` but not `accrual` and every rollback loses or repeats a
+ * fraction, so two peers' gold drifts by up to 1 per rollback and keeps drifting, silently, until their builds
+ * differ and the same purchase is affordable on one side only.
+ */
+export interface GoldState {
+  gold: number;
+  /** Fractional gold carried between ticks, always in [0, 1). */
+  accrual: number;
+  /** Gold earned over the match, for the result screen. Snapshot state so a replay cannot double-count it. */
+  totalEarned: number;
+}
+
+/** A participant's starting gold state. */
+export function initialGold(gold: number): GoldState {
+  return { gold, accrual: 0, totalEarned: 0 };
+}
+
+/**
+ * Advance one participant's passive gold by `seconds`.
+ *
+ * Pure, and deliberately the whole of the arithmetic: accumulate, take only whole gold, carry the remainder. It was
+ * previously written inline in the battle scene TWICE — once for the player and once per bot — which is both a
+ * duplication and the reason none of it was in the snapshot.
+ */
+export function advanceGold(state: GoldState, seconds: number): GoldState {
+  const accrual = state.accrual + passiveGold(seconds);
+  if (accrual < 1) return { gold: state.gold, accrual, totalEarned: state.totalEarned };
+  const whole = Math.floor(accrual);
+  return {
+    gold: state.gold + whole,
+    accrual: accrual - whole,
+    totalEarned: state.totalEarned + whole,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Bounty tables
 // ---------------------------------------------------------------------------

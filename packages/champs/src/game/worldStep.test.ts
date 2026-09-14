@@ -182,6 +182,7 @@ describe('cloneWorldState', () => {
     },
     pendingImpacts: [impact({ insertionOrder: 3, dueAt: 14 })],
     nextInsertionOrder: 4,
+    economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
     moveGoals: { a: { x: 40, y: 50 }, b: null },
   });
 
@@ -204,6 +205,18 @@ describe('cloneWorldState', () => {
     copy.units.push(unit({ id: 'c' }));
     copy.cooldowns.a.Q = 42;
     copy.cooldowns.z = { Q: 9, W: 9, E: 9, R: 9 };
+    /**
+     * Economy included, and it has to be asserted here rather than left to the rollback suite.
+     *
+     * Measured: sharing the economy record instead of copying it failed NOTHING across the whole suite, because
+     * advanceEconomy builds a new record and assigns it rather than mutating in place — so a shared reference is
+     * harmless today. That is the same argument the `lives` copy is made under, and it is not good enough on its
+     * own: this function promises a fully independent copy, and a promise that holds only while another file keeps
+     * an immutability habit is a promise that breaks during the next change.
+     */
+    copy.economy.a.gold = 99999;
+    copy.economy.a.accrual = 0.99;
+    copy.economy.z = { gold: 1, accrual: 0, totalEarned: 1 };
 
     expect(original.tick).toBe(7);
     expect(original.units).toHaveLength(2);
@@ -211,6 +224,9 @@ describe('cloneWorldState', () => {
     expect(original.units[0].hp).toBe(100);
     expect(original.cooldowns.a.Q).toBe(1);
     expect(original.cooldowns.z).toBeUndefined();
+    expect(original.economy.a.gold).toBe(500);
+    expect(original.economy.a.accrual).toBe(0);
+    expect(original.economy.z).toBeUndefined();
   });
 
   it('survives a step applied to the copy, which is how a rollback actually uses it', () => {
@@ -285,6 +301,7 @@ describe('advanceLives', () => {
     lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    economy: { a: { gold: 500, accrual: 0, totalEarned: 0 } },
     moveGoals: {},
   });
 
@@ -363,6 +380,7 @@ describe('advanceEffects', () => {
     lives: { a: createChampionLifeState() },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    economy: {},
     moveGoals: {},
   });
 

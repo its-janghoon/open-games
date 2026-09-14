@@ -3,7 +3,9 @@ import type { Simulation } from '@open-games/shared';
 import { effectiveDamage, type Unit } from './combat';
 import { createChampionLifeState } from './championLifeState';
 import { createEffectState } from './effects';
+import { initialGold } from './rift/economy';
 import {
+  advanceEconomy,
   advanceEffects,
   advanceLives,
   advanceTimers,
@@ -86,6 +88,8 @@ export function createChampsSimulation(
         lives: Object.fromEntries(participants.map((id) => [id, createChampionLifeState()])),
         pendingImpacts: [],
         nextInsertionOrder: 0,
+        // Both participants start with the same gold so a divergence cannot hide behind an initial asymmetry.
+        economy: Object.fromEntries(participants.map((id) => [id, initialGold(500)])),
         moveGoals: Object.fromEntries(participants.map((id) => [id, null])),
       };
     },
@@ -136,6 +140,10 @@ export function createChampsSimulation(
 
       advanceEffects(next, TICK_SECONDS);
       advanceLives(next);
+      // Gold advances every tick, whether or not whole gold lands. That is the point: the fractional carry is what a
+      // rollback has to restore, so a step that only touched gold on the tick it crossed a whole number would leave
+      // the carry outside the snapshot's reach again.
+      next.economy = advanceEconomy(next.economy, TICK_SECONDS);
 
       // Resolve what has landed. Damage is computed from the SOURCE as it was at cast time,
       // which is why the queue copies the shooter rather than referencing it - a shooter that

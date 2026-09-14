@@ -5,6 +5,7 @@ import {
   type ChampionLifeState,
 } from './championLifeState';
 import { expireEffects, type EffectState } from './effects';
+import { advanceGold, type GoldState } from './rift/economy';
 import {
   advanceAttackCooldown,
   distance,
@@ -125,6 +126,23 @@ export function advanceTimers(
   for (const cds of cooldowns) tickCooldowns(cds, dt);
 }
 
+/**
+ * Advance every participant's passive gold by one tick.
+ *
+ * Pure and returning a new record, unlike advanceTimers next door which mutates in place. The difference is not
+ * inconsistency for its own sake: advanceGold is pure because its carry arithmetic is the thing most worth testing in
+ * isolation, and a record step that wrapped it in mutation would hand the caller a half-pure seam that is easy to
+ * misuse.
+ */
+export function advanceEconomy(
+  economy: Record<string, GoldState>,
+  dt: number,
+): Record<string, GoldState> {
+  const next: Record<string, GoldState> = {};
+  for (const [id, gold] of Object.entries(economy)) next[id] = advanceGold(gold, dt);
+  return next;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Snapshots                                                                   */
 /* -------------------------------------------------------------------------- */
@@ -137,8 +155,8 @@ export function advanceTimers(
  * object, a timer, or a scene cannot be rewound. Unit is already a plain type, which is
  * what made this slice possible at all.
  *
- * Deliberately incomplete. It covers what the extracted step advances - positions and
- * timers - and NOT effects, projectiles, structures or gold. Declaring a full world
+ * Still incomplete, but less so than this comment used to claim: effects, champion life, the impact queue, move
+ * goals and now GOLD are all in it. What remains scene-only is structures and minion waves. Declaring a full world
  * state now would be a promise the step cannot keep, and a rollback over a state that
  * misses a field does not fail: it silently desyncs on that field.
  */
@@ -200,6 +218,19 @@ export interface WorldState {
    * A contract that holds by accident is a contract that breaks during the next change.
    */
   moveGoals: Record<string, Vec2 | null>;
+  /**
+   * Passive gold per participant.
+   *
+   * The last of these to go in and the one whose absence was hardest to see, because gold does not move anything on
+   * screen. It decides PURCHASES, so two peers who disagree about gold buy different items, get different stats and
+   * from there diverge on every trade — a desync that surfaces minutes later as damage numbers that do not match,
+   * with nothing about the moment it started to point at.
+   *
+   * The fractional `accrual` inside each entry is the fragile half: 2.04 gold per second against a 1/30 s tick means
+   * whole gold lands only every fifteenth tick and the remainder is carried. Restore the gold but not the carry and
+   * each rollback drifts a participant by up to 1.
+   */
+  economy: Record<string, GoldState>;
 }
 
 /**
@@ -235,6 +266,9 @@ export function cloneWorldState(state: WorldState): WorldState {
     ),
     pendingImpacts: state.pendingImpacts.map(cloneImpact),
     nextInsertionOrder: state.nextInsertionOrder,
+    economy: Object.fromEntries(
+      Object.entries(state.economy).map(([id, gold]) => [id, { ...gold }]),
+    ),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

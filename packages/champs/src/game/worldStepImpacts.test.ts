@@ -51,6 +51,7 @@ const world = (simTime = 0): WorldState => ({
   lives: { caster: createChampionLifeState(), victim: createChampionLifeState() },
   pendingImpacts: [],
   nextInsertionOrder: 0,
+  economy: {},
   moveGoals: { caster: null, victim: null },
 });
 

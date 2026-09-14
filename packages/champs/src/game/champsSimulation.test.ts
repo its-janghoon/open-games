@@ -36,11 +36,20 @@ function runStraightThrough(
   for (let tick = 0; tick < ticks; tick += 1) {
     const arriving = schedule.get(tick);
     if (arriving) for (const [id, input] of arriving) last.set(id, input);
-    state = sim.step(state, new Map(last), tick + 1);
+    state = sim.step(state, new Map(last), tick);
   }
   return state;
 }
 
+  /**
+   * Reference runs pass `tick`, not `tick + 1`.
+   *
+   * RollbackSession calls step(state, inputs, currentTick) and increments AFTER, so step always receives the tick it
+   * is computing, numbered from 0. A reference that passed tick + 1 labelled every state one ahead of the session's,
+   * and this suite did not notice for as long as its equality assertions enumerated fields instead of comparing whole
+   * states — the mismatch lived entirely in the one field nobody listed. Ringout hit the same off-by-one from the
+   * opposite direction.
+   */
 describe('champs world under rollback', () => {
   /**
    * What this suite can and cannot prove, stated because I established the boundary the hard way
@@ -148,7 +157,7 @@ describe('champs world under rollback', () => {
           ['p1', p1Order],
           ['p2', p2At(tick)],
         ]),
-        tick + 1,
+        tick,
       );
     }
 
@@ -167,17 +176,22 @@ describe('champs world under rollback', () => {
     expect(late.resimulated, 'a mispredicted input must force a real replay').toBeGreaterThan(0);
 
     const actual = session.peek();
-    expect(
-      actual.units.map((u) => ({ id: u.id, x: u.pos.x, y: u.pos.y, hp: u.hp, dead: u.dead })),
-    ).toEqual(
-      expected.units.map((u) => ({ id: u.id, x: u.pos.x, y: u.pos.y, hp: u.hp, dead: u.dead })),
-    );
-    expect(actual.pendingImpacts).toEqual(expected.pendingImpacts);
-    expect(actual.nextInsertionOrder).toBe(expected.nextInsertionOrder);
-    expect(actual.lives).toEqual(expected.lives);
+    /**
+     * Compare the WHOLE state, not a list of fields.
+     *
+     * This assertion used to enumerate units, impacts, the insertion counter and lives — which is exactly how a new
+     * piece of state gets added and silently goes unchecked. Adding `economy` to WorldState did not fail a single
+     * assertion here until this became a whole-object comparison, and that is the same hole gridfall's shot list and
+     * its match outcome each had. An enumerated assertion only tests what somebody remembered to list.
+     */
+    expect(actual).toEqual(expected);
     expect(
       expected.nextInsertionOrder,
       'the scenario must actually fire, or it proves nothing about the queue',
+    ).toBeGreaterThan(0);
+    expect(
+      expected.economy.p1.totalEarned,
+      'the scenario must run long enough for whole gold to land, or the carry proves nothing',
     ).toBeGreaterThan(0);
   });
 
@@ -206,7 +220,7 @@ describe('champs world under rollback', () => {
     const sim = createChampsSimulation(PARTICIPANTS);
     let persisted = sim.initial();
     for (let tick = 0; tick < 20; tick += 1) {
-      persisted = sim.step(persisted, new Map(tick >= 5 ? [['p2', firing]] : []), tick + 1);
+      persisted = sim.step(persisted, new Map(tick >= 5 ? [['p2', firing]] : []), tick);
     }
 
     expect(withReusedPredictions, 'exactly the one confirmed tick fired').toBe(1);
@@ -245,6 +259,7 @@ describe('champs world under rollback', () => {
         lives: { p1: createChampionLifeState() },
         pendingImpacts: [],
         nextInsertionOrder: 0,
+        economy: {},
         moveGoals: { p1: null },
       };
       queueImpact(state, {
@@ -288,6 +303,61 @@ describe('champs world under rollback', () => {
     expect(drainedAfterSweep).toEqual(drainedBeforeSweep);
     expect(sweepFirst.effects.p1.slows).toEqual(drainFirst.effects.p1.slows);
     expect(sweepFirst.pendingImpacts).toEqual(drainFirst.pendingImpacts);
+  });
+
+  it('carries the gold remainder across a rollback', () => {
+    /**
+     * The property the whole extraction exists for.
+     *
+     * The trickle is 2.04 gold per second against a 1/60 s tick, so a tick earns 0.034 and whole gold lands only
+     * every thirtieth one. If `accrual` is not in the snapshot, a rollback restores the gold but throws away the
+     * fraction, and the two peers drift apart by up to 1 gold per rollback — permanently, because nothing ever
+     * reconciles it. Gold decides purchases, so the drift eventually buys one side an item the other cannot afford
+     * and every trade after that disagrees.
+     *
+     * Driven long enough that whole gold lands several times, and asserted against a straight-through reference so
+     * the claim is equality with a run that never rewound, not merely a plausible number.
+     */
+    const TICKS = 200;
+    const LATE = 40;
+    const p1: ChampsInput = { moveTo: { x: 60, y: 120 }, cast: false };
+    const p2Usual: ChampsInput = { moveTo: { x: 480, y: 460 }, cast: false };
+    const p2Late: ChampsInput = { moveTo: { x: 90, y: 30 }, cast: false };
+    const p2At = (tick: number) => (tick === LATE ? p2Late : p2Usual);
+
+    const reference = createChampsSimulation(PARTICIPANTS);
+    let expected = reference.initial();
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      expected = reference.step(
+        expected,
+        new Map([
+          ['p1', p1],
+          ['p2', p2At(tick)],
+        ]),
+        tick,
+      );
+    }
+
+    const session = new RollbackSession(createChampsSimulation(PARTICIPANTS), {
+      participants: PARTICIPANTS,
+      maxRollbackTicks: 300,
+    });
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      session.setLocalInput('p1', p1);
+      if (tick !== LATE) session.applyRemoteInput('p2', tick, p2At(tick));
+      session.advanceTo(tick + 1);
+    }
+    const late = session.applyRemoteInput('p2', LATE, p2Late);
+    expect(late.accepted, late.rejection ?? 'should accept').toBe(true);
+    expect(late.resimulated, 'a mispredicted input must force a real replay').toBeGreaterThan(0);
+
+    expect(session.peek().economy).toEqual(expected.economy);
+    // The scenario has to actually cross whole-gold boundaries, or a dropped carry would be invisible.
+    expect(expected.economy.p1.totalEarned).toBeGreaterThan(3);
+    expect(
+      expected.economy.p1.accrual,
+      'and it must end mid-fraction, which is the state a rollback can lose',
+    ).toBeGreaterThan(0);
   });
 
   it('refuses an input older than the rollback window instead of applying it to the wrong base', () => {
