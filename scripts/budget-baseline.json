@@ -1,0 +1,66 @@
+{
+  "_why": "Gzipped transfer ceilings per game. The mission is that these games are reachable on metered data, so bytes need something that refuses them. Ceilings are measured-today plus ~8% headroom, deliberately not an aspiration: a budget nobody can meet gets raised until it means nothing.",
+  "_knownWins": [
+    "Audio ships as WAV (uncompressed PCM), 850-1265 KB gzipped per game - larger than the Phaser engine itself. Ogg/Opus would cut this by roughly an order of magnitude and is the single biggest available saving.",
+    "Korean webfonts are unevenly subset. whiteout ships NanumGothicCoding at 76 KB for two weights; lastwar ships NotoSansKR at 557 KB and champs 1.09 MB across two weights, both named .subset but evidently not subset to the glyphs used. whiteout proves ~40 KB per weight is achievable for the same job.",
+    "champs PRELOADS its two 540 KB Korean fonts from index.html, so they are part of the first wait rather than a background cost."
+  ],
+  "budgets": {
+    "champs": {
+      "coldLoad": 1356452,
+      "total": 1824205,
+      "byClass": {
+        "js": 520530,
+        "css": 30752,
+        "image": 77504,
+        "font": 1218599,
+        "other": 18695,
+        "html": 17360
+      }
+    },
+    "kingshot": {
+      "coldLoad": 417547,
+      "total": 2212959,
+      "byClass": {
+        "audio": 1161491,
+        "image": 99337,
+        "js": 414413,
+        "font": 545115,
+        "html": 18560
+      }
+    },
+    "lastwar": {
+      "coldLoad": 427699,
+      "total": 2028050,
+      "byClass": {
+        "audio": 945676,
+        "image": 62800,
+        "font": 602415,
+        "other": 18356,
+        "js": 424193,
+        "html": 19631
+      }
+    },
+    "whiteout": {
+      "coldLoad": 436129,
+      "total": 2209034,
+      "byClass": {
+        "audio": 1404789,
+        "image": 285865,
+        "font": 92824,
+        "js": 434304,
+        "html": 17792
+      }
+    },
+    "wirework": {
+      "coldLoad": 405164,
+      "total": 1518432,
+      "byClass": {
+        "audio": 1072250,
+        "image": 54966,
+        "js": 403402,
+        "html": 17414
+      }
+    }
+  }
+}
