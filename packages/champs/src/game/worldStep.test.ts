@@ -10,7 +10,7 @@ import {
   type WorldBounds,
   type WorldState,
 } from './worldStep';
-import type { Unit } from './combat';
+import type { PendingImpact, Unit } from './combat';
 import { createChampionLifeState } from './championLifeState';
 import { createEffectState } from './effects';
 
@@ -144,6 +144,21 @@ describe('advanceTimers', () => {
   });
 });
 
+const impact = (over: Partial<PendingImpact> = {}): PendingImpact => ({
+  dueAt: 10,
+  insertionOrder: 0,
+  source: unit({ id: 'a', pos: { x: 5, y: 6 } }),
+  radius: 30,
+  rawDamage: 40,
+  color: 0xffffff,
+  stunDuration: 0,
+  ability: true,
+  ultimate: false,
+  singleTarget: false,
+  chronoProc: false,
+  ...over,
+});
+
 describe('cloneWorldState', () => {
   const state = (): WorldState => ({
     tick: 7,
@@ -165,6 +180,8 @@ describe('cloneWorldState', () => {
       a: { phase: 'alive', diedAt: null, respawnsAt: null, invulnerableUntil: null },
       b: { phase: 'dead', diedAt: 11, respawnsAt: 25, invulnerableUntil: null },
     },
+    pendingImpacts: [impact({ insertionOrder: 3, dueAt: 14 })],
+    nextInsertionOrder: 4,
   });
 
   it('copies every value', () => {
@@ -265,6 +282,8 @@ describe('advanceLives', () => {
     cooldowns: { a: { Q: 0, W: 0, E: 0, R: 0 } },
     effects: { a: createEffectState() },
     lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
+    pendingImpacts: [],
+    nextInsertionOrder: 0,
   });
 
   it('leaves a champion dead before its deadline', () => {
@@ -340,6 +359,8 @@ describe('advanceEffects', () => {
       a: { ...createEffectState(), slows: [{ source: 'q', percent: 0.5, expiresAt }] },
     },
     lives: { a: createChampionLifeState() },
+    pendingImpacts: [],
+    nextInsertionOrder: 0,
   });
 
   it('moves the clock and expires what the new clock has passed', () => {

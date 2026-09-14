@@ -53,6 +53,8 @@ describe('advanceLives against a real match', () => {
       cooldowns: { a: { Q: 0, W: 0, E: 0, R: 0 } },
       effects: { a: createEffectState() },
       lives: { a: { phase: 'dead', diedAt: 0, respawnsAt: RESPAWN_DELAY, invulnerableUntil: null } },
+      pendingImpacts: [],
+      nextInsertionOrder: 0,
     };
 
     const observed: { t: number; phase: string; dead: boolean }[] = [];
@@ -82,6 +84,8 @@ describe('advanceLives against a real match', () => {
       cooldowns: { a: { Q: 0, W: 0, E: 0, R: 0 } },
       effects: { a: createEffectState() },
       lives: { a: { phase: 'dead', diedAt: 0, respawnsAt: RESPAWN_DELAY, invulnerableUntil: null } },
+      pendingImpacts: [],
+      nextInsertionOrder: 0,
     });
 
     const just_before = build(RESPAWN_DELAY - 0.001);

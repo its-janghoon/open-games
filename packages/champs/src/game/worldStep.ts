@@ -8,8 +8,10 @@ import { expireEffects, type EffectState } from './effects';
 import {
   advanceAttackCooldown,
   distance,
+  partitionImpacts,
   tickCooldowns,
   type CooldownState,
+  type PendingImpact,
   type Unit,
   type Vec2,
 } from './combat';
@@ -164,6 +166,25 @@ export interface WorldState {
    * corpse was, and from there the two peers disagree about who is on the map.
    */
   lives: Record<string, ChampionLifeState>;
+  /**
+   * Hits committed but not yet landed, in queue order.
+   *
+   * A snapshot without these loses damage that was already paid for: a cast several ticks ago
+   * decides a kill on a tick the rollback is about to replay, and if the queue is empty the
+   * kill simply never happens.
+   */
+  pendingImpacts: PendingImpact[];
+  /**
+   * The next value to stamp on a queued impact.
+   *
+   * This is the half that is easy to leave out, and leaving it out reintroduces the ordering
+   * bug that partitionImpacts was just fixed for. Restore the queue but not the counter, and a
+   * cast replayed after the restore is stamped with a number that some entry still in the
+   * queue already holds - so two impacts sharing a deadline become genuinely indistinguishable
+   * and the tiebreak has nothing left to break on. The counter is state, not a scratch
+   * variable.
+   */
+  nextInsertionOrder: number;
 }
 
 /**
@@ -197,6 +218,35 @@ export function cloneWorldState(state: WorldState): WorldState {
     lives: Object.fromEntries(
       Object.entries(state.lives).map(([id, life]) => [id, { ...life }]),
     ),
+    pendingImpacts: state.pendingImpacts.map(cloneImpact),
+    nextInsertionOrder: state.nextInsertionOrder,
+  };
+}
+
+/**
+ * A pending impact, copied deeply enough that nothing in it is shared.
+ *
+ * Three levels, and each is a real hazard rather than defensive habit. The array itself,
+ * because a replayed tick queues new casts. The impact object, because a resolution can adjust
+ * it. And `source.pos` and the `line` box, because those are the geometry the hit is judged
+ * against - share them and a champion moving after the shot was fired retroactively changes
+ * where that shot was aimed, which is precisely the mid-flight independence the copy-at-cast
+ * design was built to guarantee.
+ */
+function cloneImpact(impact: PendingImpact): PendingImpact {
+  return {
+    ...impact,
+    source: { ...impact.source, pos: { ...impact.source.pos } },
+    ...(impact.point ? { point: { ...impact.point } } : {}),
+    ...(impact.line
+      ? {
+          line: {
+            ...impact.line,
+            origin: { ...impact.line.origin },
+            endpoint: { ...impact.line.endpoint },
+          },
+        }
+      : {}),
   };
 }
 
@@ -259,6 +309,37 @@ export function advanceEffects(state: WorldState, dt: number): void {
  * snapshot that restored a live phase beside a dead flag would describe a champion that
  * is both.
  */
+/**
+ * Queue a hit, stamping it with the next insertion order.
+ *
+ * The stamp is taken from the state rather than from a module-level counter, which is the
+ * whole reason this function exists: a counter living outside the state would not be restored
+ * by a rollback, so after a rewind the replayed casts would re-use numbers the restored queue
+ * still holds.
+ */
+export function queueImpact(
+  state: WorldState,
+  impact: Omit<PendingImpact, 'insertionOrder'>,
+): PendingImpact {
+  const queued = { ...impact, insertionOrder: state.nextInsertionOrder } as PendingImpact;
+  state.nextInsertionOrder += 1;
+  state.pendingImpacts.push(queued);
+  return queued;
+}
+
+/**
+ * Take the hits that have come due, leaving the rest queued.
+ *
+ * Ordering comes from partitionImpacts, which breaks equal deadlines on insertionOrder — see
+ * combat.ts for why array position could not do that job even in live play. The remainder is
+ * written back so the queue never holds an entry twice.
+ */
+export function drainDueImpacts(state: WorldState): PendingImpact[] {
+  const { due, pending } = partitionImpacts(state.pendingImpacts, state.simTime);
+  state.pendingImpacts = pending;
+  return due;
+}
+
 export function advanceLives(state: WorldState, mode: GameMode = 'conquest'): void {
   for (const [id, life] of Object.entries(state.lives)) {
     const next = advanceChampionLife(life, state.simTime, mode);

@@ -17,6 +17,7 @@ import {
   partitionImpacts,
   persistentEnemy,
   projectileImpactTime,
+  type PendingImpact,
   resetAttackCooldown,
   resolveAbility,
   startCooldown,
@@ -518,30 +519,6 @@ interface Entity {
   campMemberKey?: string;
 }
 
-interface PendingImpact {
-  dueAt: number;
-  insertionOrder: number;
-  source: Unit;
-  targetId?: string;
-  point?: Vec2;
-  line?: {
-    origin: Vec2;
-    endpoint: Vec2;
-    halfWidth: number;
-    subsequentDamageMultiplier: number;
-  };
-  radius: number;
-  rawDamage: number;
-  color: number;
-  stunDuration: number;
-  slowPercent?: number;
-  slowDuration?: number;
-  pullDuration?: number;
-  ability: boolean;
-  ultimate: boolean;
-  singleTarget: boolean;
-  chronoProc: boolean;
-}
 
 interface PendingWaveSpawn {
   dueAt: number;

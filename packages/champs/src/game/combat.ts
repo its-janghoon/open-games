@@ -95,6 +95,48 @@ export interface TimedImpact {
 }
 
 /**
+ * A hit that has been committed but has not landed yet — what "a projectile in flight"
+ * actually is in this game. There is no travelling entity: a cast computes the absolute time
+ * its damage arrives and queues this, and the visual is a tween that happens to take the
+ * same duration.
+ *
+ * Lives here rather than in the scene because it is simulation state: it decides damage
+ * several ticks after the input that created it, so a snapshot without it loses a kill that
+ * was already paid for. Nothing in it is a render object - `color` is a plain number carried
+ * through to the impact flash, which costs a field in the snapshot and buys not having to
+ * re-derive it from an ability that may since have been re-levelled.
+ *
+ * `source` is a COPY of the caster taken at cast time, not a reference. That is deliberate in
+ * the original design and load-bearing for rollback: damage is computed from the attacker as
+ * it was when the shot left, so the caster dying or being buffed mid-flight cannot change a
+ * hit already in the air.
+ */
+export interface PendingImpact extends TimedImpact {
+  dueAt: number;
+  insertionOrder: number;
+  source: Unit;
+  targetId?: string;
+  point?: Vec2;
+  line?: {
+    origin: Vec2;
+    endpoint: Vec2;
+    halfWidth: number;
+    subsequentDamageMultiplier: number;
+  };
+  radius: number;
+  rawDamage: number;
+  color: number;
+  stunDuration: number;
+  slowPercent?: number;
+  slowDuration?: number;
+  pullDuration?: number;
+  ability: boolean;
+  ultimate: boolean;
+  singleTarget: boolean;
+  chronoProc: boolean;
+}
+
+/**
  * Partition an impact queue without mutating it. Entries with equal deadlines keep their
  * queued order; pending entries are sorted by deadline.
  *
