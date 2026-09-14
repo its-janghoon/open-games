@@ -84,6 +84,14 @@ export const STRINGS = {
   },
   'town.defenseWave': { en: 'Defense {value} · Wave {wave}/{total}', ko: '방어 {value} · 웨이브 {wave}/{total}' },
   'town.warmthLow': { en: 'Hearth dying! Stock wood', ko: '화롯불 꺼져감! 목재 확보' },
+  // For a keep with no Lumber Mill, the line above is impossible: it has no way to
+  // secure firewood. Townsfolk always gather rations and stone, which the hearth
+  // never burns, so the Lumber Mill is always eventually affordable - name it.
+  'town.warmthStranded': { en: 'No wood! Build the Lumber Mill', ko: '목재 없음! 제재소를 지으세요' },
+  'town.warmthStrandedHint': {
+    en: 'The hearth is out of firewood and nothing is making more. Townsfolk still gather rations and stone, so build the Lumber Mill — it costs no firewood — and the supply returns.',
+    ko: '화롯불에 땔 목재가 없고 만들 곳도 없습니다. 주민들은 여전히 식량과 석재를 모으니, 목재가 들지 않는 제재소를 지으면 공급이 돌아옵니다.',
+  },
   'town.warmthLowHint': {
     en: 'The keep is going cold — production is slowing. Keep enough wood to feed the hearth.',
     ko: '성이 식어 가고 있습니다 — 생산이 느려집니다. 화롯불을 지필 목재를 충분히 확보하세요.',

@@ -47,8 +47,11 @@
       "id": "stranded-save-guidance",
       "game": "whiteout, kingshot",
       "severity": "high",
-      "what": "A save with no fuel and no producer shows a red warning and advice the player cannot follow.",
-      "measured_cause": "Node proves a NEW game is correct - wood 200, coal 100, warmth 100 - so this is not a boot defect. What the screenshots showed was a stranded save left in the browser profile by earlier probing. The defect is the guidance: whiteout says 'Warmth is low. Keep timber and coal stocked and upgrade the Furnace', which is impossible with 0 timber, and kingshot says '화롯불 꺼져감! 목재 확보'. Neither names the one affordable action, which after the phase-0 fix is building the rations-only producer. The recovery path exists; the text does not point at it."
+      "status": "CLOSED",
+      "what": "A save with no fuel and no producer showed a red warning and advice the player could not follow.",
+      "measured_cause": "Node proves a NEW game is correct - wood 200, coal 100, warmth 100 - so this was never a boot defect; the screenshots showed a stranded save left in the browser profile by earlier probing. The defect was the guidance. whiteout told that player to 'keep timber and coal stocked and upgrade the Furnace', every part of which needs timber, and kingshot said '화롯불 꺼져감! 목재 확보'. After the phase-0 rescue fix there IS exactly one affordable action - the producer that costs only non-fuel resources - and neither game named it.",
+      "fix": "whiteout's ObjectiveSystem gained STRANDED_ADVISORY, which outranks the low-warmth advisory when no timber producer stands and points at the Sawmill (rations only). kingshot's warning choice moved out of TownScene into config/ColdGuidance as pure functions and names the Lumber Mill (rations and stone, no firewood). The condition is on PRODUCTION, not stock: a hold with three timber and no producer is in the same trap a few seconds earlier.",
+      "verified": "14 new tests across the two games, all in Node with no browser. They pin the honesty of the advice as a property, not the wording: the named building must cost nothing that appears in FUEL_PER_SECOND, must actually produce that fuel, and every resource it does cost must appear in the gather floor - so re-pricing it in firewood later fails the build instead of silently making the advice impossible again. Two existing advisory tests were retargeted to a hold that has a producer rather than weakened."
     },
     {
       "id": "wav-audio",

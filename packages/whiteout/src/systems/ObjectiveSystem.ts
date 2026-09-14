@@ -68,7 +68,8 @@ export type ObjectiveId =
   | 'war_camp'
   | 'train'
   | 'battle'
-  | 'warmth';
+  | 'warmth'
+  | 'stranded';
 
 /**
  * A single guidance objective. `label` is a short tr() key (the title of the
@@ -173,6 +174,44 @@ export const WARMTH_ADVISORY: Objective = {
 };
 
 /**
+ * The advisory for a hold that has run out of fuel AND has no way to make more.
+ *
+ * This exists because the low-warmth advisory gives that player advice they
+ * cannot follow. It says to keep timber and coal stocked and raise the Furnace -
+ * every part of which needs timber, which is exactly what they do not have. A
+ * player reading it concludes the game is broken, and they are not wrong to.
+ *
+ * The hold is not actually stuck: the phase-0 rescue fix put a forage floor on
+ * RATIONS, a resource the Furnace never burns, precisely so there is always one
+ * affordable way back. That way is the Sawmill, which costs rations alone. So this
+ * advisory names it.
+ *
+ * It outranks the warmth advisory rather than replacing it, because the two
+ * describe different situations: warmth is low and you have fuel to manage, versus
+ * warmth is low and you have nothing, in which case there is exactly one move.
+ */
+export const STRANDED_ADVISORY: Objective = {
+  id: 'stranded',
+  label: 'objective.stranded.label',
+  instruction: 'objective.stranded.instruction',
+  target: 'sawmill',
+  // Complete as soon as a timber producer stands - at that point the ordinary
+  // warmth advice becomes followable again.
+  isComplete: (v) => levelOf(v, 'sawmill') >= 1,
+};
+
+/**
+ * Whether the hold can no longer produce the fuel it burns.
+ *
+ * Deliberately a check on PRODUCTION, not on the stockpile. A hold with 3 timber
+ * left and no Sawmill is in the same trap as one with zero - it is just a few
+ * seconds earlier - and telling it to "keep timber stocked" is equally useless.
+ */
+export function cannotMakeFuel(view: ObjectiveView): boolean {
+  return levelOf(view, 'sawmill') < 1;
+}
+
+/**
  * The single objective the player should act on for the given view, or null
  * when the guided flow is complete (every ordered objective satisfied AND
  * warmth is fine).
@@ -186,6 +225,9 @@ export const WARMTH_ADVISORY: Objective = {
  */
 export function currentObjective(view: ObjectiveView): Objective | null {
   if (view.warmthRatio <= LOW_WARMTH_ADVISORY_RATIO) {
+    // A cold hold that cannot MAKE fuel gets the one piece of advice it can act
+    // on, before the generic keep-it-stocked advice it cannot.
+    if (cannotMakeFuel(view)) return STRANDED_ADVISORY;
     return WARMTH_ADVISORY;
   }
   for (const objective of OBJECTIVES) {

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { SceneKeys, PALETTE, CANVAS, RESOURCE_ORDER, HUD } from '../config/GameConfig';
 import { stackRows } from '../config/HudLayout';
+import { coldWarningKey, coldHintKey } from '../config/ColdGuidance';
 import { TextureKeys, AudioKeys, BUILDING_TEXTURE_BY_KIND, RESOURCE_ICON_FRAME } from '../config/AssetKeys';
 import { BUILDING_ORDER, buildingDef, isProducer } from '../config/BuildingConfig';
 import type { BuildingKind, ResourceKind } from '../types';
@@ -479,8 +480,14 @@ export class TownScene extends Phaser.Scene {
     this.warmthBar.setFillColor(low ? PALETTE.DANGER : PALETTE.ACCENT);
     this.warmthLabel.setColor(low ? PALETTE.DANGER_CSS : PALETTE.ACCENT_CSS);
     if (low) {
-      this.warmthWarning.setText(tr('town.warmthLow')).setVisible(true);
-      if (this.lastWarmthLow === false) announceStatus(tr('town.warmthLowHint'));
+      // Which warning depends on whether the keep can still MAKE firewood. Telling
+      // a keep with no Lumber Mill to secure firewood is advice it cannot act on;
+      // see config/ColdGuidance.
+      const levels = Object.fromEntries(
+        BUILDING_ORDER.map((kind) => [kind, this.state.buildings.level(kind)]),
+      );
+      this.warmthWarning.setText(tr(coldWarningKey(levels))).setVisible(true);
+      if (this.lastWarmthLow === false) announceStatus(tr(coldHintKey(levels)));
     } else {
       this.warmthWarning.setVisible(false);
     }

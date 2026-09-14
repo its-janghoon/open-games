@@ -141,6 +141,14 @@ export const STRINGS = {
     en: 'Warmth is low. Keep timber and coal stocked and upgrade the Furnace to burn fuel more efficiently.',
     ko: '온기가 낮습니다. 목재와 석탄을 채워 두고 용광로를 올려 연료를 더 효율적으로 태우세요.',
   },
+  // For a hold with no timber producer, the advice above is impossible: every part
+  // of it needs timber. Survivors always forage rations, which the Furnace never
+  // burns, so the Sawmill is always eventually affordable - name it.
+  'objective.stranded.label': { en: 'Out of timber', ko: '목재가 없습니다' },
+  'objective.stranded.instruction': {
+    en: 'No timber and nothing making it. Survivors still forage rations, so build the Sawmill — it costs rations only — and timber will start flowing again.',
+    ko: '목재가 없고 만들 곳도 없습니다. 생존자들은 여전히 식량을 채집하니, 식량만 드는 제재소를 지으면 목재가 다시 들어옵니다.',
+  },
 
   // Warmth (the signature frozen-survival mechanic).
   'warmth.label': { en: 'Warmth', ko: '온기' },

@@ -136,7 +136,15 @@ describe('ObjectiveSystem.currentObjective', () => {
 
 describe('ObjectiveSystem low-warmth advisory', () => {
   it('takes priority over the ordered list when warmth is low', () => {
-    const obj = currentObjective({ ...freshView(), warmthRatio: 0.2 });
+    // A Sawmill stands, so the hold CAN make fuel and the ordinary keep-it-stocked
+    // advice is followable. Without one it is stranded instead and gets different
+    // advice - see stranded.test.ts - because telling a hold with no timber to
+    // stock timber is advice it cannot act on.
+    const obj = currentObjective({
+      ...freshView(),
+      levels: { ...freshView().levels, sawmill: 1 },
+      warmthRatio: 0.2,
+    });
     expect(obj?.id).toBe('warmth');
     expect(obj?.target).toBe('furnace');
     expect(obj).toBe(WARMTH_ADVISORY);
@@ -159,7 +167,11 @@ describe('ObjectiveSystem low-warmth advisory', () => {
   });
 
   it('fires exactly AT the advisory threshold (inclusive)', () => {
-    const obj = currentObjective({ ...freshView(), warmthRatio: LOW_WARMTH_ADVISORY_RATIO });
+    const obj = currentObjective({
+      ...freshView(),
+      levels: { ...freshView().levels, sawmill: 1 },
+      warmthRatio: LOW_WARMTH_ADVISORY_RATIO,
+    });
     expect(obj?.id).toBe('warmth');
   });
 });
