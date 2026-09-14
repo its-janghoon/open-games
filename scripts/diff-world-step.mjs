@@ -75,13 +75,45 @@ const headless = {
   moveSpeed: before.moveSpeed,
   pos: { x: before.pos.x, y: before.pos.y },
 };
-// One step of the whole elapsed window. Exact for a straight-line move: the direction
-// never changes, so N small steps and one summed step land in the same place.
-moveUnitToward(headless, goal, elapsedSeconds, {
-  slowFactor: context?.slowFactor ?? 0,
-  buffFraction: context?.buffFraction ?? 0,
-  pinned: context?.pinned ?? false,
-});
+
+/**
+ * Segments. A capture whose modifiers hold for the whole window is ONE segment, and the
+ * single-step trick applies. A capture where an effect expires partway through is not:
+ * the unit travels at two speeds, and replaying it as one step with either speed reports
+ * a difference that is the comparator's own fault rather than the code's.
+ *
+ * This is the limitation that made the mid-expiry check impossible before. The straight
+ * line still buys the important half - direction never changes, so each segment can be a
+ * single step of its own duration - it just cannot span a change in speed.
+ */
+const segments = Array.isArray(capture.segments)
+  ? capture.segments
+  : [
+      {
+        seconds: elapsedSeconds,
+        slowFactor: context?.slowFactor ?? 0,
+        buffFraction: context?.buffFraction ?? 0,
+        pinned: context?.pinned ?? false,
+      },
+    ];
+
+const segmentTotal = segments.reduce((sum, s) => sum + s.seconds, 0);
+if (Math.abs(segmentTotal - elapsedSeconds) > 0.05) {
+  console.error(
+    `the segments sum to ${segmentTotal.toFixed(3)} s but the window was ` +
+      `${elapsedSeconds.toFixed(3)} s — the capture describes a different amount of time ` +
+      'than it measured, so any verdict would be meaningless',
+  );
+  process.exit(2);
+}
+
+for (const segment of segments) {
+  moveUnitToward(headless, goal, segment.seconds, {
+    slowFactor: segment.slowFactor ?? 0,
+    buffFraction: segment.buffFraction ?? 0,
+    pinned: segment.pinned ?? false,
+  });
+}
 
 const dx = headless.pos.x - after.pos.x;
 const dy = headless.pos.y - after.pos.y;
@@ -103,6 +135,11 @@ const TOLERANCE = 4;
 
 console.log('world-step differential');
 console.log(`  window            ${elapsedSeconds.toFixed(3)} s at moveSpeed ${before.moveSpeed}`);
+console.log(
+  `  segments          ${segments
+    .map((s) => `${s.seconds.toFixed(2)}s slow ${(s.slowFactor ?? 0).toFixed(2)}`)
+    .join(' | ')}`,
+);
 console.log(`  live travelled    ${travelledLive.toFixed(2)} units`);
 console.log(`  headless          ${travelledHeadless.toFixed(2)} units`);
 console.log(`  drift             ${drift.toFixed(2)} units (tolerance ${TOLERANCE})`);

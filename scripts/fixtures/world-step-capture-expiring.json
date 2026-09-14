@@ -1,0 +1,50 @@
+{
+  "goal": {
+    "x": 1105.2,
+    "y": 871.2
+  },
+  "elapsedSeconds": 1.5023000000119209,
+  "before": {
+    "pos": {
+      "x": 205.2,
+      "y": 571.2
+    },
+    "moveSpeed": 66,
+    "attackCdRemaining": 0
+  },
+  "cdsBefore": {
+    "Q": 0,
+    "W": 0,
+    "E": 0,
+    "R": 0
+  },
+  "cdsAfter": {
+    "Q": 0,
+    "W": 0,
+    "E": 0,
+    "R": 0
+  },
+  "after": {
+    "pos": {
+      "x": 277.7268381359615,
+      "y": 595.375612711987
+    },
+    "moveSpeed": 66,
+    "attackCdRemaining": 0
+  },
+  "segments": [
+    {
+      "seconds": 0.7,
+      "slowFactor": 0.5
+    },
+    {
+      "seconds": 0.8023000000119209,
+      "slowFactor": 0
+    }
+  ],
+  "context": {
+    "note": "a 0.5 slow expired 0.7s into a 1.5s window"
+  },
+  "slowsRemaining": 0,
+  "_why": "A real capture where a 0.5 slow EXPIRED 0.7s into a 1.5s window. The slowed fixture keeps its slow alive for 60s, so it cannot detect a wrong expiry; this one can - never expiring reads as 49.5 units against 76.45 measured."
+}

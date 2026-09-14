@@ -1,3 +1,4 @@
+import { expireEffects, type EffectState } from './effects';
 import {
   advanceAttackCooldown,
   distance,
@@ -135,9 +136,20 @@ export function advanceTimers(
  */
 export interface WorldState {
   tick: number;
+  /**
+   * The simulation clock, in seconds — the scene's `elapsed`.
+   *
+   * Part of the snapshot because every effect expiry is a comparison against it. Restore
+   * positions and timers but not the clock, and a replayed tick resolves buffs against
+   * the wrong `now`: effects that had ended come back, or live ones vanish. The clock is
+   * state, not ambient context.
+   */
+  simTime: number;
   units: Unit[];
   /** Ability cooldowns per participant id. */
   cooldowns: Record<string, CooldownState>;
+  /** Active effects per unit id. */
+  effects: Record<string, EffectState>;
 }
 
 /**
@@ -153,9 +165,54 @@ export interface WorldState {
 export function cloneWorldState(state: WorldState): WorldState {
   return {
     tick: state.tick,
+    simTime: state.simTime,
     units: state.units.map((unit) => ({ ...unit, pos: { x: unit.pos.x, y: unit.pos.y } })),
     cooldowns: Object.fromEntries(
       Object.entries(state.cooldowns).map(([id, cds]) => [id, { ...cds }]),
     ),
+    effects: Object.fromEntries(
+      Object.entries(state.effects).map(([id, fx]) => [id, cloneEffectState(fx)]),
+    ),
   };
+}
+
+/**
+ * Each of the six arrays is rebuilt and each effect object copied.
+ *
+ * Spreading EffectState alone would be the exact bug the clone tests catch: the six
+ * fields would be the SAME arrays, so pushing a slow onto the copy would slow the
+ * original too. The per-effect spread matters for the same reason one level down - a
+ * shield's `amount` is decremented as it absorbs damage, and a pull's destination is a
+ * Vec2 that gets rewritten, so a shared effect object leaks mutations backwards through
+ * the snapshot.
+ */
+export function cloneEffectState(state: EffectState): EffectState {
+  return {
+    shields: state.shields.map((e) => ({ ...e })),
+    slows: state.slows.map((e) => ({ ...e })),
+    armor: state.armor.map((e) => ({ ...e })),
+    movement: state.movement.map((e) => ({ ...e })),
+    pulls: state.pulls.map((e) => ({ ...e, destination: { ...e.destination } })),
+    burns: state.burns.map((e) => ({ ...e })),
+  };
+}
+
+/**
+ * Advance the clock and run the tick's SINGLE effect expiry.
+ *
+ * One sweep per tick, deliberately, because that is what the scene does and because
+ * expiry is the one effect operation that must not be driven by reads. See effects.ts:
+ * strongestSlow and friends expire as they answer, which makes the world depend on the
+ * pattern of queries instead of only on the inputs, and rollback replays a tick with a
+ * different pattern.
+ *
+ * Expiry is applied AFTER the clock moves, so an effect whose expiry falls inside the
+ * step is gone by the time anything reads it — matching the scene, where the sweep sits
+ * at the top of the frame using the already-updated elapsed time.
+ */
+export function advanceEffects(state: WorldState, dt: number): void {
+  state.simTime += dt;
+  for (const fx of Object.values(state.effects)) {
+    expireEffects(fx, state.simTime);
+  }
 }

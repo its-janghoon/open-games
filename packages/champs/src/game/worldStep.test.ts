@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  advanceEffects,
   advanceTimers,
   cloneWorldState,
   moveUnitToward,
@@ -9,6 +10,7 @@ import {
   type WorldState,
 } from './worldStep';
 import type { Unit } from './combat';
+import { createEffectState } from './effects';
 
 /**
  * These pin the arithmetic BattleScene now delegates to. The value of extracting it was
@@ -143,8 +145,20 @@ describe('advanceTimers', () => {
 describe('cloneWorldState', () => {
   const state = (): WorldState => ({
     tick: 7,
+    simTime: 12.5,
     units: [unit({ id: 'a', pos: { x: 1, y: 2 } }), unit({ id: 'b', pos: { x: 3, y: 4 } })],
     cooldowns: { a: { Q: 1, W: 2, E: 3, R: 4 }, b: { Q: 0, W: 0, E: 0, R: 0 } },
+    effects: {
+      a: {
+        shields: [{ source: 'q', amount: 50, expiresAt: 20 }],
+        slows: [{ source: 'w', percent: 0.3, expiresAt: 20 }],
+        armor: [{ source: 'e', amount: 10, expiresAt: 20 }],
+        movement: [{ source: 'r', percent: 0.25, expiresAt: 20 }],
+        pulls: [{ source: 'p', destination: { x: 9, y: 9 }, speed: 5, expiresAt: 20 }],
+        burns: [{ sourceId: 'b', rawDamagePerSecond: 4, expiresAt: 20, accumulator: 0.5 }],
+      },
+      b: createEffectState(),
+    },
   });
 
   it('copies every value', () => {
@@ -189,5 +203,98 @@ describe('cloneWorldState', () => {
     let current = state();
     for (let i = 0; i < 50; i += 1) current = cloneWorldState(current);
     expect(current).toEqual(state());
+  });
+
+  it('gives each effect array its own identity, so pushing to the copy cannot slow the original', () => {
+    // The shape this catches: spreading EffectState copies the OBJECT but shares its six
+    // arrays. A rollback would then apply a replayed tick's new slow to the very snapshot
+    // it was supposed to be able to fall back to.
+    const original = state();
+    const copy = cloneWorldState(original);
+
+    copy.effects.a.slows.push({ source: 'injected', percent: 0.9, expiresAt: 99 });
+    copy.effects.b.pulls.push({
+      source: 'injected',
+      destination: { x: 0, y: 0 },
+      speed: 1,
+      expiresAt: 99,
+    });
+    expect(original.effects.a.slows).toHaveLength(1);
+    expect(original.effects.b.pulls).toHaveLength(0);
+
+    // One level deeper: the fields a fight mutates in place.
+    copy.effects.a.shields[0].amount = 0;
+    copy.effects.a.burns[0].accumulator = 99;
+    copy.effects.a.pulls[0].destination.x = -1;
+    expect(original.effects.a.shields[0].amount, 'an absorbing shield must not leak back').toBe(50);
+    expect(original.effects.a.burns[0].accumulator).toBe(0.5);
+    expect(original.effects.a.pulls[0].destination.x).toBe(9);
+  });
+
+  it('copies the clock, because every expiry is a comparison against it', () => {
+    const original = state();
+    const copy = cloneWorldState(original);
+    copy.simTime = 999;
+    expect(original.simTime).toBe(12.5);
+  });
+});
+
+describe('advanceEffects', () => {
+  const withSlow = (expiresAt: number): WorldState => ({
+    tick: 0,
+    simTime: 10,
+    units: [unit({ id: 'a' })],
+    cooldowns: { a: { Q: 0, W: 0, E: 0, R: 0 } },
+    effects: {
+      a: { ...createEffectState(), slows: [{ source: 'q', percent: 0.5, expiresAt }] },
+    },
+  });
+
+  it('moves the clock and expires what the new clock has passed', () => {
+    const state = withSlow(10.4);
+    advanceEffects(state, 0.5);
+    expect(state.simTime).toBe(10.5);
+    expect(
+      state.effects.a.slows,
+      'expiry uses the clock AFTER it moves, matching the scene',
+    ).toHaveLength(0);
+  });
+
+  it('leaves an effect that outlives the step', () => {
+    const state = withSlow(30);
+    advanceEffects(state, 0.5);
+    expect(state.effects.a.slows).toHaveLength(1);
+  });
+
+  it('sweeps every unit, not only the first', () => {
+    const state = withSlow(10.1);
+    state.effects.b = {
+      ...createEffectState(),
+      slows: [{ source: 'q', percent: 0.5, expiresAt: 10.1 }],
+    };
+    advanceEffects(state, 0.5);
+    expect(state.effects.a.slows).toHaveLength(0);
+    expect(state.effects.b.slows).toHaveLength(0);
+  });
+
+  it('restores expiry correctly after a rollback rewinds the clock', () => {
+    // The property the clock is in the snapshot FOR. Advance past an expiry, then restore
+    // the earlier snapshot: the effect must be alive again, because at that tick it
+    // genuinely was. Leave the clock out and this is unrecoverable - the restored state
+    // reads its buffs against a future now and the effect stays dead.
+    const state = withSlow(10.4);
+    const snapshot = cloneWorldState(state);
+    advanceEffects(state, 0.5);
+    expect(state.effects.a.slows).toHaveLength(0);
+
+    const restored = cloneWorldState(snapshot);
+    expect(restored.simTime).toBe(10);
+    expect(restored.effects.a.slows, 'the effect was alive at the restored tick').toHaveLength(1);
+
+    // And replaying the same step from the restored state reaches the same place, which is
+    // what makes a resimulation agree with the original run.
+    advanceEffects(restored, 0.5);
+    expect(restored.simTime).toBe(10.5);
+    expect(restored.effects.a.slows).toHaveLength(0);
   });
 });
