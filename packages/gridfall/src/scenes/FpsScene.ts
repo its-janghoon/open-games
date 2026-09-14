@@ -16,6 +16,7 @@ import { openTabTransport, tabTransportAvailable, type Role, type TabTransport }
 import { NetSession } from '@open-games/shared';
 import { hashGridWorld } from '../game/gridSimulation';
 import { FONT_STACK } from '../config/fontStack';
+import { CueSynth } from '@open-games/shared';
 
 /**
  * The first-person view, drawn from geometry alone.
@@ -85,6 +86,20 @@ export class FpsScene extends Phaser.Scene {
   private rematchHint!: Phaser.GameObjects.Text;
   /** Set once the result has been shown, so the rematch is armed exactly once. */
   private resultShown = false;
+  private readonly cues = new CueSynth();
+  /**
+   * The previously DRAWN state, for cue transitions.
+   *
+   * Not part of the simulation and deliberately not in the snapshot: nothing in the step reads it, and a rollback
+   * must not rewind what the player has already heard.
+   */
+  private lastSeen: {
+    shotIds: Set<string>;
+    hp: number[];
+    kills: number[];
+    alive: boolean[];
+    decided: boolean;
+  } | null = null;
   private view!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Graphics;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -311,8 +326,49 @@ export class FpsScene extends Phaser.Scene {
     this.draw();
   }
 
+  /**
+   * Fire sound cues by OBSERVING state transitions, never from inside the step.
+   *
+   * This distinction is the whole design. A rollback replays ticks — that is its job — so a cue emitted inside
+   * `stepGrid` would sound again every time a tick was re-simulated, and a laggy connection would turn one shot into
+   * a stutter of shots. Observing the drawn state instead means a cue fires once per visible change.
+   *
+   * Every comparison is DIRECTIONAL for the same reason: a rewind makes the observed state move backwards, so hp
+   * rising or a shot list shrinking must fire nothing. Only forward transitions are audible.
+   */
+  private emitCues(world: GridWorld): void {
+    const previous = this.lastSeen;
+    this.lastSeen = {
+      shotIds: new Set(world.shots.map((shot) => shot.id)),
+      hp: world.players.map((player) => player.hp),
+      kills: world.players.map((player) => player.kills),
+      alive: world.players.map((player) => player.respawnAt === null),
+      decided: world.outcome.kind !== 'ongoing',
+    };
+    if (!previous) return;
+
+    // A shot id that was not in the previous frame is a new shot. Ids include the tick, so they are never reused.
+    for (const shot of world.shots) {
+      if (!previous.shotIds.has(shot.id)) {
+        this.cues.play('shoot');
+        break; // One cue per frame however many were fired; several at once would just clip.
+      }
+    }
+
+    world.players.forEach((player, index) => {
+      if (player.hp < (previous.hp[index] ?? player.hp)) this.cues.play('hit');
+      const wasAlive = previous.alive[index] ?? true;
+      const isAlive = player.respawnAt === null;
+      if (wasAlive && !isAlive) this.cues.play('death');
+      if (!wasAlive && isAlive) this.cues.play('respawn');
+    });
+
+    if (!previous.decided && world.outcome.kind !== 'ongoing') this.cues.play('matchWin');
+  }
+
   private draw(): void {
     const world = this.world();
+    this.emitCues(world);
     const eye = this.eye();
     const g = this.view;
     g.clear();

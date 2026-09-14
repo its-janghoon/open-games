@@ -28,6 +28,7 @@ import { poseFor, segments, type Pose } from '../game/pose';
 import { EMPTY_TALLY, recordRound, type Tally } from '../game/tally';
 import { tr, type Language, type TrKey } from '../i18n/strings';
 import { FONT_STACK } from '../config/fontStack';
+import { CueSynth } from '@open-games/shared';
 
 /**
  * The fight, drawn from geometry alone.
@@ -59,6 +60,13 @@ export class FightScene extends Phaser.Scene {
    * because a scene restart passes it forward explicitly.
    */
   private tally: Tally = EMPTY_TALLY;
+  private readonly cues = new CueSynth();
+  /** The previously DRAWN state, for cue transitions. Not simulation state and never in the snapshot. */
+  private lastSeen: {
+    hp: number[];
+    attack: (string | null)[];
+    decided: boolean;
+  } | null = null;
 
   /** Set once a round has ended and been counted, so a rematch cannot award the same round twice. */
   private counted = false;
@@ -214,8 +222,37 @@ export class FightScene extends Phaser.Scene {
     this.draw();
   }
 
+  /**
+   * Fire sound cues by OBSERVING state transitions, never from inside the step.
+   *
+   * A rollback replays ticks, so a cue emitted inside stepFight would sound again for every re-simulated tick and a
+   * laggy connection would turn one punch into a stutter. Every comparison is DIRECTIONAL: a rewind makes the observed
+   * state move backwards, so hp RISING fires nothing.
+   */
+  private emitCues(state: FightState): void {
+    const previous = this.lastSeen;
+    this.lastSeen = {
+      hp: state.fighters.map((fighter) => fighter.hp),
+      attack: state.fighters.map((fighter) => fighter.attack),
+      decided: state.outcome.kind !== 'ongoing',
+    };
+    if (!previous) return;
+
+    state.fighters.forEach((fighter, index) => {
+      // A new attack id means a strike just started — the whiff sound, before anyone knows if it lands.
+      if (fighter.attack !== null && previous.attack[index] !== fighter.attack) this.cues.play('swing');
+      if (fighter.hp < (previous.hp[index] ?? fighter.hp)) this.cues.play('land');
+    });
+
+    if (!previous.decided && state.outcome.kind !== 'ongoing') {
+      // A ring-out and a knockout are different events and should not sound the same.
+      this.cues.play(state.outcome.kind === 'ringout' ? 'ringout' : 'roundWin');
+    }
+  }
+
   private draw(): void {
     const state = this.session.peek();
+    this.emitCues(state);
     const g = this.graphics;
     g.clear();
 
