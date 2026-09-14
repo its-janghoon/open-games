@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BuildingSystem } from './BuildingSystem';
 import { ResourceStore } from './ResourceStore';
+import { WARMTH } from '../config/GameConfig';
 import { TrainingQueue } from './TrainingQueue';
 import { defenseValue, outputPerSec, upgradeTimeMs } from '../config/BuildingConfig';
 import { ECONOMY } from '../config/GameConfig';
@@ -89,7 +90,10 @@ describe('BuildingSystem', () => {
     const rates = bs.productionRates();
     expect(rates.food).toBeCloseTo(outputPerSec('farm', 2), 5);
     expect(rates.wood).toBeCloseTo(outputPerSec('lumber_mill', 1), 5);
-    expect(rates.stone).toBe(0);
+    // No Quarry stands, so stone shows exactly the rescue floor - not a
+    // building's output. This still fails if any of these buildings starts
+    // producing stone (see WARMTH.BASELINE_GATHER_PER_SEC).
+    expect(rates.stone).toBeCloseTo(WARMTH.BASELINE_GATHER_PER_SEC.stone, 6);
     // Higher farm level produces strictly more food.
     expect(outputPerSec('farm', 2)).toBeGreaterThan(outputPerSec('farm', 1));
   });
@@ -212,21 +216,25 @@ describe('BuildingSystem', () => {
   });
 
   describe('badgeState (built / buildable / locked)', () => {
-    it('fresh game: town_center=built, farm & lumber_mill=buildable, quarry=locked', () => {
-      // The exact story FEAT-002 fixes: on a brand-new game the Lumber Mill and
-      // Farm are buildable RIGHT NOW (Town Center Lv.1 already met), while the
-      // Quarry is truly locked behind Town Center Lv.2.
+    it('fresh game: town_center=built, the three basic producers buildable, mine locked', () => {
+      // The exact story FEAT-002 fixes: on a brand-new game the basic producers
+      // are buildable RIGHT NOW (Town Center Lv.1 already met) while a genuinely
+      // gated building is locked. The Quarry belongs to the buildable group now:
+      // stone is required to RAISE the Town Center, so gating stone's only
+      // producer behind Town Center Lv.2 made stone unobtainable to any town that
+      // had spent its starting grant. The Mine (Lv.3) is the gated example.
       const bs = new BuildingSystem();
       const store = richStore();
 
       expect(bs.badgeState('town_center', store).state).toBe('built');
       expect(bs.badgeState('farm', store).state).toBe('buildable');
       expect(bs.badgeState('lumber_mill', store).state).toBe('buildable');
+      expect(bs.badgeState('quarry', store).state).toBe('buildable');
 
-      const quarry = bs.badgeState('quarry', store);
-      expect(quarry.state).toBe('locked');
+      const mine = bs.badgeState('mine', store);
+      expect(mine.state).toBe('locked');
       // The locked badge can name the Town Center level the player must reach.
-      expect(quarry.requiredTownCenterLevel).toBe(2);
+      expect(mine.requiredTownCenterLevel).toBe(3);
     });
 
     it("'buildable' even when the player cannot yet afford it (cost is not locked)", () => {
@@ -247,14 +255,16 @@ describe('BuildingSystem', () => {
         { kind: 'lumber_mill', level: 1, upgradeEndsAt: null },
       ]);
       expect(withMill.badgeState('lumber_mill', store).state).toBe('built');
-      // Quarry (needs TC2) is still locked at TC1.
-      expect(withMill.badgeState('quarry', store).state).toBe('locked');
+      // The Mine (needs TC3) is still locked at TC1.
+      expect(withMill.badgeState('mine', store).state).toBe('locked');
 
-      // Raise the Town Center to Lv.2 and the Quarry becomes buildable.
+      // Raise the Town Center to Lv.2 and the Barracks becomes buildable.
       const tc2 = new BuildingSystem([{ kind: 'town_center', level: 2, upgradeEndsAt: null }]);
-      expect(tc2.badgeState('quarry', store).state).toBe('buildable');
-      // The Barracks (also TC2-gated) likewise flips to buildable.
       expect(tc2.badgeState('barracks', store).state).toBe('buildable');
+      // The Mine needs one level more than that.
+      expect(tc2.badgeState('mine', store).state).toBe('locked');
+      const tc3 = new BuildingSystem([{ kind: 'town_center', level: 3, upgradeEndsAt: null }]);
+      expect(tc3.badgeState('mine', store).state).toBe('buildable');
     });
   });
 });

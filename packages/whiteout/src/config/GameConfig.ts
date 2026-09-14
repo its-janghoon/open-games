@@ -281,25 +281,23 @@ export const WARMTH = {
    */
   COAL_FROM_FURNACE_LEVEL: 2,
   /**
-   * Timber survivors forage per second while the hold has NO timber producer.
+   * Rations survivors forage per second while the hold has NO food producer.
+   * An anti-softlock floor, not an economy knob.
    *
-   * This is an ANTI-SOFTLOCK FLOOR, not an economy knob. Both starter producers
-   * cost a resource the Furnace also burns - the Sawmill costs coal, the
-   * Hunter's Hut costs timber - so a hold could reach a state with zero timber,
-   * zero coal and no producer, where every affordable action was gone and income
-   * was nil. Nothing in the game could recover that; it was a dead save.
+   * Note the resource: RATIONS, never fuel. That is the whole design. Rescuing
+   * through fuel cannot work, and the mistake is instructive - an earlier version
+   * foraged timber at 0.9/s against a 0.6/s burn, which did unstick the economy
+   * but also meant a hold with nothing stayed at full warmth indefinitely. A
+   * frozen-survival game that cannot freeze has lost its subject.
    *
-   * It MUST exceed FUEL_PER_SECOND.wood, and that is the whole point of the
-   * number. A first attempt used 0.2/s against a 0.6/s burn, which is not a floor
-   * at all: a simulated ten-minute opening ended with timber pinned at 0.1 and
-   * the 40-timber Hunter's Hut permanently unaffordable, because the Furnace ate
-   * the trickle faster than it arrived. Only a surplus lets a stranded hold climb
-   * out, so warmthFloorIsAFloor() asserts the relationship and a test pins it.
+   * Rations are safe because the Furnace never burns them, so warmth still falls
+   * exactly as before while a broke hold slowly earns the Sawmill that restores
+   * its timber. That is why the Sawmill's cost was changed to rations only: the
+   * building which ends a fuel drought must not itself require fuel.
    *
-   * Scoped to holds with no Sawmill so it cannot distort the real economy: the
-   * Sawmill produces 1.6/s and this stops entirely once one is standing.
+   * Stops the moment a Hunter's Hut stands, which makes 2.0/s.
    */
-  BASELINE_FORAGE_WOOD_PER_SEC: 0.9,
+  BASELINE_FORAGE_FOOD_PER_SEC: 0.7,
   /**
    * Fractional reduction in fuel burn per Furnace level above 1 (e.g. 0.05 =
    * 5% cheaper per level). Clamped so burn never drops below FUEL_MIN_FACTOR of
@@ -327,12 +325,14 @@ export const WARMTH = {
  * at ratio 1, so callers (WarmthSystem, tests, UI) share one curve definition.
  */
 /**
- * The anti-softlock floor only works if it OUT-PACES the fuel burn it has to
- * outrun. Exported so a test can pin the relationship rather than the number:
- * lowering the floor below the burn silently restores the dead-end state.
+ * The anti-softlock floor must sit on a resource the Furnace does NOT burn.
+ * Exported so a test pins the PROPERTY rather than a number: putting the floor on
+ * a fuel either fails to unstick the economy (below the burn) or makes the hold
+ * unfreezable (above it), and both have been shipped by mistake once.
  */
 export function warmthFloorIsAFloor(): boolean {
-  return WARMTH.BASELINE_FORAGE_WOOD_PER_SEC > WARMTH.FUEL_PER_SECOND.wood;
+  const fuels = Object.keys(WARMTH.FUEL_PER_SECOND);
+  return WARMTH.BASELINE_FORAGE_FOOD_PER_SEC > 0 && !fuels.includes('food');
 }
 
 export function warmthProductionMultiplier(warmthRatio: number): number {

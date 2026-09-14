@@ -10,6 +10,7 @@ import {
   upgradeTimeMs,
 } from '../config/BuildingConfig';
 import type { BuildingKind, BuildingState, ResourceCost, Resources } from '../types';
+import { WARMTH } from '../config/GameConfig';
 import { ResourceStore, type ProductionRates } from './ResourceStore';
 
 /** Outcome of attempting to start an upgrade. */
@@ -231,6 +232,14 @@ export class BuildingSystem {
       const level = this.level(kind);
       if (level <= 0 || !def.produces) continue;
       rates[def.produces] += outputPerSec(kind, level);
+    }
+    // Townsfolk gather a little of anything they have no producer for. This is
+    // the anti-softlock floor on WARMTH.BASELINE_GATHER_PER_SEC: a town that has
+    // spent everything must still be able to earn its way back to a producer,
+    // and the cheapest one costs BOTH timber and rations.
+    for (const res of Object.keys(WARMTH.BASELINE_GATHER_PER_SEC) as (keyof ProductionRates)[]) {
+      const rate = WARMTH.BASELINE_GATHER_PER_SEC[res as 'food' | 'stone'];
+      if (rates[res] <= 0) rates[res] += rate;
     }
     return rates;
   }

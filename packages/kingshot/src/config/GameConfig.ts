@@ -188,6 +188,28 @@ export const WARMTH = {
    */
   FUEL_PER_SECOND: { wood: 0.5 },
   /**
+   * Rations and stone the townsfolk gather per second while NO producer of that
+   * resource stands. An anti-softlock floor, not an economy knob.
+   *
+   * Note which resources are NOT here: firewood, the fuel. That omission is the
+   * whole design. A floor on the fuel itself has to exceed the hearth's burn to
+   * let an emptied town accumulate anything - and a floor above the burn means
+   * the hearth can never run cold, which deletes the game's central tension. A
+   * first attempt did exactly that: gathering timber at 0.8/s against a 0.5/s
+   * burn left warmth pinned at maximum and three tests that assert the cold bites
+   * started failing.
+   *
+   * Rescuing through a NON-fuel resource resolves it, because the Lumber Mill -
+   * the building that restores firewood income - costs rations and stone and no
+   * firewood at all. So a broke town can always earn its way back to a fuel
+   * supply while the hearth still goes cold in the meantime, which is exactly the
+   * pressure the game wants.
+   *
+   * Both stop the moment a real producer stands: the Farm makes 2.0/s and the
+   * Quarry 1.0/s, so this never shapes a working economy.
+   */
+  BASELINE_GATHER_PER_SEC: { food: 0.6, stone: 0.4 },
+  /**
    * Fractional reduction in fuel burn per Town Center level above 1 (e.g. 0.05
    * = 5% cheaper per level). Clamped so burn never drops below FUEL_MIN_FACTOR
    * of the base, keeping firewood always meaningful.

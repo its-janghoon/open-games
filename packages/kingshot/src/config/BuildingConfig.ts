@@ -78,11 +78,16 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     maxLevel: BUILDINGS.MAX_LEVEL,
   },
   quarry: {
+    // Town Center level 1, not 2. Stone is REQUIRED to raise the Town Center
+    // (1->2 costs stone 96), so gating its only producer behind level 2 makes
+    // stone unobtainable to any hold that has spent its starting 250 - the
+    // same circular dependency that stranded Frosthold on coal, hidden here
+    // only because the starting grant happens to cover the first two upgrades.
     kind: 'quarry',
     baseCost: { wood: 80, food: 40 },
     baseOutputPerSec: 1.0,
     produces: 'stone',
-    requiresTownCenterLevel: 2,
+    requiresTownCenterLevel: 1,
     maxLevel: BUILDINGS.MAX_LEVEL,
   },
   mine: {

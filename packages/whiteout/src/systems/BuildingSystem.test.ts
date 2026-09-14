@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BuildingSystem } from './BuildingSystem';
 import { ResourceStore } from './ResourceStore';
+import { WarmthSystem } from './WarmthSystem';
 import { WARMTH, warmthFloorIsAFloor } from '../config/GameConfig';
 import {
   BUILDING_ORDER,
@@ -127,12 +128,29 @@ describe('BuildingSystem', () => {
     for (const k of added) expect(buildingDef(k).requiresFurnaceLevel).toBeGreaterThanOrEqual(1);
   });
 
-  it('forages faster than the Furnace burns, or it is not a floor', () => {
-    // A floor smaller than the burn is eaten as it arrives. The first attempt
-    // used 0.2/s against a 0.6/s burn and a simulated opening ended with timber
-    // pinned at 0.1 and the 40-timber Hunter's Hut permanently unaffordable.
+  it('puts the rescue floor on a resource the Furnace never burns', () => {
+    // Two wrong versions shipped before this. A timber floor BELOW the burn was
+    // eaten as it arrived, so a hold with nothing could still never afford a
+    // producer. A timber floor ABOVE the burn unstuck the economy but left a hold
+    // with nothing sitting at full warmth forever - a frozen-survival game that
+    // cannot freeze. Rations are burnt by nothing, so both problems go away.
     expect(warmthFloorIsAFloor()).toBe(true);
-    expect(WARMTH.BASELINE_FORAGE_WOOD_PER_SEC).toBeGreaterThan(WARMTH.FUEL_PER_SECOND.wood);
+    expect(WARMTH.BASELINE_FORAGE_FOOD_PER_SEC).toBeGreaterThan(0);
+    expect(Object.keys(WARMTH.FUEL_PER_SECOND)).not.toContain('food');
+  });
+
+  it('lets the cold bite: a hold with nothing still freezes', () => {
+    const store = new ResourceStore({ food: 0, wood: 0, coal: 0, iron: 0 });
+    const buildings = new BuildingSystem([{ kind: 'furnace', level: 1, upgradeEndsAt: null }]);
+    const warmth = new WarmthSystem(WARMTH.MAX_WARMTH);
+    for (let t = 0; t < 600; t += 1) {
+      const level = buildings.level('furnace');
+      warmth.tick(1000, level, store);
+      store.applyProduction(buildings.productionRates(), 1000, warmth.productionMultiplier(level));
+    }
+    expect(warmth.warmth).toBe(0);
+    // ...while still earning its way toward the Sawmill that ends the drought.
+    expect(store.get('food')).toBeGreaterThanOrEqual(buildingDef('sawmill').baseCost.food ?? 0);
   });
 
   it('a hold with nothing built still earns its way to a producer', () => {
@@ -141,12 +159,12 @@ describe('BuildingSystem', () => {
     // affordable action and no income, and nothing in the game can recover it.
     const bs = new BuildingSystem([{ kind: 'furnace', level: 1, upgradeEndsAt: null }]);
     const rates = bs.productionRates();
-    expect(rates.wood).toBeGreaterThan(0);
+    expect(rates.food).toBeGreaterThan(0);
 
     // The cheapest producer must become affordable in finite time from empty.
-    const hutWood = buildingDef('hunters_hut').baseCost.wood ?? 0;
-    expect(hutWood).toBeGreaterThan(0);
-    const secondsToAfford = hutWood / rates.wood;
+    const millFood = buildingDef('sawmill').baseCost.food ?? 0;
+    expect(millFood).toBeGreaterThan(0);
+    const secondsToAfford = millFood / rates.food;
     expect(Number.isFinite(secondsToAfford)).toBe(true);
     expect(secondsToAfford).toBeLessThan(60 * 10);
   });
@@ -159,13 +177,13 @@ describe('BuildingSystem', () => {
       { kind: 'forge_hall', level: 3, upgradeEndsAt: null },
       { kind: 'envoy_hall', level: 3, upgradeEndsAt: null },
     ]);
-    // None of them contribute to the idle production rates. Timber still shows
-    // the baseline forage floor, which is not a building's output - so this is
-    // asserted as EXACTLY the floor, and would still fail if any of these
-    // buildings started producing timber.
+    // None of them contribute to the idle production rates. Rations still show
+    // the rescue floor, which is not a building's output - so that is asserted as
+    // EXACTLY the floor, and still fails if any of these buildings starts
+    // producing rations.
     const rates = bs.productionRates();
-    expect(rates.food).toBe(0);
-    expect(rates.wood).toBeCloseTo(WARMTH.BASELINE_FORAGE_WOOD_PER_SEC, 6);
+    expect(rates.food).toBeCloseTo(WARMTH.BASELINE_FORAGE_FOOD_PER_SEC, 6);
+    expect(rates.wood).toBe(0);
     expect(rates.coal).toBe(0);
     expect(rates.iron).toBe(0);
   });

@@ -70,8 +70,11 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     maxLevel: BUILDINGS.MAX_LEVEL,
   },
   sawmill: {
+    // Rations only, no coal. The Sawmill is what ends a timber drought, so it
+    // must not require a resource the Furnace burns - otherwise a hold that has
+    // run dry can never build the thing that would refill it.
     kind: 'sawmill',
-    baseCost: { food: 40, coal: 20 },
+    baseCost: { food: 60 },
     baseOutputPerSec: 1.6,
     produces: 'wood',
     requiresFurnaceLevel: 1,

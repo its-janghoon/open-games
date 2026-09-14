@@ -349,8 +349,10 @@ describe('SaveManager', () => {
     const expectedFood = outputPerSec('farm', 2) * elapsedSec * ECONOMY.OFFLINE_EFFICIENCY;
     expect(loaded.offlineGains.food).toBeCloseTo(expectedFood, 4);
     expect(loaded.snapshot.resources.get('food')).toBeCloseTo(100 + expectedFood, 4);
-    // Non-produced resources are unchanged.
-    expect(loaded.snapshot.resources.get('stone')).toBe(300);
+    // Stone has no producer here, so it accrues the rescue floor rather than
+    // staying put (see WARMTH.BASELINE_GATHER_PER_SEC - it exists so a town that
+    // has spent everything can still earn its way back to a Lumber Mill).
+    expect(loaded.snapshot.resources.get('stone')).toBeGreaterThan(300);
     // The keep stayed fully warm and the woodpile was only drawn down by the
     // hearth's firewood burn over the window (no wood producer here). At TC L3
     // the burn is reduced by the fuel-efficiency factor.
