@@ -81,28 +81,48 @@ export function slotForAbility(abilityId: string): 'Q' | 'W' | 'E' | 'R' | null 
 }
 
 /**
- * The intent a command expresses, or null when it expresses none.
+ * A player action, reduced to what the mapping actually needs.
+ *
+ * Neutral on purpose. The battle scene issues internal orders (move-to, target-at,
+ * attack-move-to) while the wire protocol carries MatchCommands, and the judgement
+ * about what an action MEANS must not be written twice - two copies would drift, and
+ * a ghost learned through one path would stop matching a ghost learned through the
+ * other. So both adapt to this shape and the judgement lives once.
+ */
+export type PlayerAction =
+  | { kind: 'move'; destination: Point }
+  | { kind: 'cast'; abilityId: string }
+  | { kind: 'other' };
+
+/** Adapt a wire command to a PlayerAction. */
+export function actionForCommand(command: MatchCommand): PlayerAction {
+  if (command.type === 'move') return { kind: 'move', destination: command.destination };
+  if (command.type === 'cast') return { kind: 'cast', abilityId: command.abilityId };
+  return { kind: 'other' };
+}
+
+/**
+ * The intent an action expresses, or null when it expresses none.
  *
  * A cast maps to its slot rather than to a generic "use ability", because which
  * ability a player reaches for is most of what distinguishes them.
  */
-export function intentForCommand(
-  command: MatchCommand,
+export function intentForAction(
+  action: PlayerAction,
   context: CommandContext,
 ): AiIntent | null {
-  if (command.type === 'purchase' || command.type === 'surrender') return null;
+  if (action.kind === 'other') return null;
 
-  if (command.type === 'cast') {
-    const slot = slotForAbility(command.abilityId);
+  if (action.kind === 'cast') {
+    const slot = slotForAbility(action.abilityId);
     if (!slot) return null;
     return (`cast${slot}` as AiIntent);
   }
 
-  // move
   const enemy = context.nearestEnemy;
   if (!enemy) return null;
   const before = dist(context.self, enemy);
-  const after = dist(command.destination, enemy);
+  const after = dist(action.destination, enemy);
 
   // Moving onto a target you can already reach is committing to the fight, not
   // repositioning - the player is closing the last few units to swing.
@@ -113,6 +133,14 @@ export function intentForCommand(
   const delta = before - after;
   if (Math.abs(delta) < LATERAL_TOLERANCE) return null;
   return delta > 0 ? 'approach' : 'retreat';
+}
+
+/** The intent a wire command expresses. Thin adapter over {@link intentForAction}. */
+export function intentForCommand(
+  command: MatchCommand,
+  context: CommandContext,
+): AiIntent | null {
+  return intentForAction(actionForCommand(command), context);
 }
 
 /**

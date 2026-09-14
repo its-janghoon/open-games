@@ -29,6 +29,10 @@ import {
   type Vec2,
 } from '../combat';
 import { decideAction, type AiIntent, type AiSnapshot } from '../ai';
+import { GhostRecorder, intentForAction, type PlayerAction } from '../ghostRecorder';
+import type { GhostObservation } from '../ghost';
+import { saveLearnedGhost } from '../../profile/ghostStore';
+import { loadProfile, saveProfile } from '../../profile';
 import {
   lowestHpRatioHostile,
   resolveDashEndpoint,
@@ -634,6 +638,11 @@ export default class BattleScene extends Phaser.Scene {
   // the human player's.
   private playerProgress: ProgressState = createProgress();
   private ownedItems: string[] = [];
+  /**
+   * Observations of the human's own decisions, for learning their ghost. Bounded by
+   * the recorder itself so a long match cannot grow memory.
+   */
+  private ghostRecorder = new GhostRecorder<GhostObservation>();
   private goldAccrual = 0;
   private playerTotalGoldEarned = STARTING_GOLD;
   private playerDeaths = 0;
@@ -1929,6 +1938,11 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private processCommand(command: BattleCommand): void {
+    // Learn the player's style from their orders. Hooked HERE because this is the one
+    // place every player action passes through, so nothing is missed and nothing is
+    // counted twice - a per-input-handler hook would have to be repeated for the
+    // pointer, the keyboard and the on-screen buttons.
+    this.recordGhostObservation(command);
     if (this.pauseReasons.size > 0 || this.elapsed >= this.rules.hardCapSeconds) return;
     if (command.type === 'purchase') {
       this.processPurchase(command.itemId);
@@ -2422,9 +2436,55 @@ export default class BattleScene extends Phaser.Scene {
     return path[Math.min(state.pushIndex, path.length - 1)];
   }
 
+  /**
+   * Resolve the per-side state a snapshot needs, for a bot OR for the human.
+   *
+   * buildAiSnapshot originally read everything from `entity.bot!`, which threw for the
+   * player - and the player's snapshot is exactly what learning a ghost needs. It has
+   * to be built the SAME way as a bot's, not approximately: learnGhost scores each
+   * snapshot with the base policy, so a snapshot missing context would be measured
+   * against a different baseline and the learned biases would describe nothing.
+   *
+   * The scene already keeps the human's counterparts as separate fields and already
+   * resolves them this way elsewhere (`isHuman ? this.ownedItems : entity.bot!.ownedItems`),
+   * so this only names that pattern once.
+   */
+  private sideState(entity: Entity): {
+    champion: Champion;
+    resource: number;
+    maxResource: number;
+    cds: CooldownState;
+    progress: ProgressState;
+    ownedItems: string[];
+    side: MapSide;
+  } {
+    if (entity === this.player) {
+      return {
+        champion: this.playerChampion,
+        resource: this.playerResource,
+        maxResource: this.playerMaxResource,
+        cds: this.playerCds,
+        progress: this.playerProgress,
+        ownedItems: this.ownedItems,
+        // The human is always the ally side in a local match.
+        side: 'ally',
+      };
+    }
+    const bot = entity.bot!;
+    return {
+      champion: bot.champion,
+      resource: bot.resource,
+      maxResource: bot.maxResource,
+      cds: bot.cds,
+      progress: bot.progress,
+      ownedItems: bot.ownedItems,
+      side: bot.side,
+    };
+  }
+
   private buildAiSnapshot(bot: Entity, target: Unit | undefined): AiSnapshot {
     const u = bot.unit;
-    const state = bot.bot!;
+    const state = this.sideState(bot);
     const dist = target ? distance(u.pos, target.pos) : Infinity;
     const [q, w, e, r] = state.champion.abilities;
     const nearbyChampions = this.champions.filter(
@@ -4423,8 +4483,78 @@ export default class BattleScene extends Phaser.Scene {
     };
   }
 
+  /**
+   * Translate one of the scene's own orders into the neutral action shape and record
+   * what it expresses, when it expresses anything.
+   *
+   * Most orders record nothing, which is the design: a ghost learns from choices that
+   * reveal a preference, so arming attack-move or cancelling an aim must not count.
+   * See ghostRecorder for why a lateral move is also silent.
+   */
+  private recordGhostObservation(command: BattleCommand): void {
+    if (this.ended || !this.player) return;
+
+    let action: PlayerAction;
+    if (command.type === 'move-to' || command.type === 'attack-move-to' || command.type === 'target-at') {
+      if (!command.point) return;
+      action = { kind: 'move', destination: { x: command.point.x, y: command.point.y } };
+    } else if (command.type === 'cast' && command.slot) {
+      action = { kind: 'cast', abilityId: `${this.playerChampion.id}.${command.slot}` };
+    } else {
+      return;
+    }
+
+    const self = this.player.unit;
+    const enemy = this.nearestHostileChampion(self);
+    const intent = intentForAction(action, {
+      self: { x: self.pos.x, y: self.pos.y },
+      nearestEnemy: enemy ? { x: enemy.pos.x, y: enemy.pos.y } : null,
+      attackRange: self.attackRange,
+    });
+    if (!intent) return;
+
+    this.ghostRecorder.record({
+      snapshot: this.buildAiSnapshot(this.player, enemy ?? undefined),
+      chosen: intent,
+    });
+  }
+
+  /**
+   * Learn from the match just played and store the result.
+   *
+   * Wrapped because this must never break a finished match: storage can be full or
+   * blocked, and a player who has just won should see their result, not an exception
+   * from a side feature.
+   */
+  private persistLearnedGhost(): void {
+    try {
+      const observations = this.ghostRecorder.observations();
+      const outcome = saveLearnedGhost(loadProfile(), observations);
+      if (outcome.outcome === 'saved') saveProfile(outcome.profile);
+    } catch (err) {
+      console.warn('[ghost] could not store the learned ghost', err);
+    }
+  }
+
+  /** Nearest living hostile champion to a unit, or undefined. */
+  private nearestHostileChampion(self: Unit): Unit | undefined {
+    let best: Unit | undefined;
+    let bestDist = Infinity;
+    for (const entity of this.champions) {
+      const other = entity.unit;
+      if (other === self || other.dead || !areHostile(self.team, other.team)) continue;
+      const d = distance(self.pos, other.pos);
+      if (d < bestDist) {
+        bestDist = d;
+        best = other;
+      }
+    }
+    return best;
+  }
+
   private endGame(resolution: MatchResolution) {
     const result = resolution.winner === 'ally' ? 'win' : resolution.winner === 'enemy' ? 'loss' : 'draw';
+    this.persistLearnedGhost();
     this.recordLearning('victory-condition');
     this.ended = true;
     this.pushHud();
