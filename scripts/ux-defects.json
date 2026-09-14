@@ -1,0 +1,64 @@
+{
+  "_why": "Measured inventory of what is actually wrong in the shipped games right now, re-derived from running builds rather than from memory of an old screenshot. Phase 2 works from this, and a gate is only added where the defect has a provable shape.",
+  "measured": "2026-09-14",
+  "method": "All five games rebuilt and deployed to a local static server, then driven over the Chrome DevTools Protocol. Layout defects come from the live display list (scripts/lib/text-overlap-probe.js); economy claims come from Node against the real systems.",
+
+  "closed_in_phase_0": [
+    "whiteout coal deadlock - a resource required from the first second whose only producer was gated behind an upgrade that itself cost it",
+    "whiteout town safe area - the nav row covered the two lowest building rows",
+    "whiteout objective strip overflow - body text ran under the Skip button",
+    "whiteout focus chip - the DOM accessibility mirror revealed itself on a mouse-opened modal",
+    "kingshot stone circularity - the same shape as the coal deadlock",
+    "panel bounds and text wrap, now gated by check:panels and check:text"
+  ],
+
+  "open": [
+    {
+      "id": "kingshot-hud-rows",
+      "game": "kingshot",
+      "scene": "TownScene",
+      "severity": "high",
+      "what": "Four HUD text rows collide in the top-left corner. Measured 8 overlapping visible text pairs, the worst at 67%.",
+      "measured_cause": "Rows are placed at y=10, 28, 40 and 60 - steps of 18 to 20px - while the rendered text is taller than the step. Same root shape as the panel-bounds finding: a spacing constant smaller than the content it has to separate. Worst pairs: '2497/5000'@[40,10] vs '+0.1/초 순 0.1/초'@[40,28]; '+0.1/초...'@[40,28] vs '온기 0/100...'@[20,40]; '온기 0/100...'@[20,40] vs '화롯불 꺼져감! 목재 확보'@[150,60].",
+      "not_a_gate_yet": "A build gate would need a rule that separates this from a modal legitimately covering content. Depth does not separate them: '방어 0 · 웨이브 1/20' vs '저장됨' sit at depths 5 and 6 and ARE a real collision, while a modal over a label is a large depth gap. Same-depth-only is too narrow, any-depth is too broad."
+    },
+    {
+      "id": "whiteout-banner-over-label",
+      "game": "whiteout",
+      "scene": "TownScene",
+      "severity": "medium",
+      "what": "The objective banner overlaps a building's level label at 67%.",
+      "measured_cause": "'Level 1'@[457,165] against the banner body starting at [198,145]. The banner grew to two lines after the wrap fix, and the building label row above SAFE_AREA.TOP was not moved down to match."
+    },
+    {
+      "id": "stranded-save-guidance",
+      "game": "whiteout, kingshot",
+      "severity": "high",
+      "what": "A save with no fuel and no producer shows a red warning and advice the player cannot follow.",
+      "measured_cause": "Node proves a NEW game is correct - wood 200, coal 100, warmth 100 - so this is not a boot defect. What the screenshots showed was a stranded save left in the browser profile by earlier probing. The defect is the guidance: whiteout says 'Warmth is low. Keep timber and coal stocked and upgrade the Furnace', which is impossible with 0 timber, and kingshot says '화롯불 꺼져감! 목재 확보'. Neither names the one affordable action, which after the phase-0 fix is building the rations-only producer. The recovery path exists; the text does not point at it."
+    },
+    {
+      "id": "wav-audio",
+      "game": "all five",
+      "severity": "high",
+      "what": "Audio ships as uncompressed WAV: 855 KB (lastwar) to 1270 KB (whiteout) gzipped, larger than the Phaser engine.",
+      "measured_cause": "gzip cannot compress PCM. Ogg/Opus would cut this by roughly an order of magnitude. This is UX on a cheap phone as much as it is bytes."
+    },
+    {
+      "id": "korean-font-subsetting",
+      "game": "champs, lastwar, kingshot",
+      "severity": "high",
+      "what": "Korean webfonts are 476 KB to 1.09 MB per game where 76 KB does the same job.",
+      "measured_cause": "whiteout ships two NanumGothicCoding weights totalling 76 KB. lastwar ships one NotoSansKR weight at 557 KB, kingshot Galmuri11 at 504 KB, champs two NotoSansKR weights at 1.09 MB - the last named .subset but evidently not subset to the glyphs used. champs also PRELOADS both from index.html, making its cold load 1226 KB against 366-394 KB for the others."
+    }
+  ],
+
+  "checked_and_clean": [
+    "lastwar RunScene: 17 visible texts, zero overlapping pairs",
+    "every game's TitleScene: zero overlapping pairs",
+    "171 asset paths across five games all present and same-origin (check:selfhosted)",
+    "zero third-party runtime requests, zero payment integrations (check:network, check:payments)"
+  ],
+
+  "measurement_trap_recorded": "The first overlap pass reported 324 pairs in kingshot and 39 in whiteout. Nearly all were text inside CLOSED panels still sitting in the display list: the probe tested each object's own .visible but not its ancestors'. Walking the parentContainer chain for visibility and alpha, and dropping offscreen text, brought the honest counts to 8 and 2. Any future display-list rule must use effective visibility, not .visible."
+}
