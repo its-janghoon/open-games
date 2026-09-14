@@ -166,6 +166,7 @@ describe('the state hash', () => {
         { id: 's1', ownerId: 'a', x: 3, y: 4, dirX: 1, dirY: 0, expiresAt: 90 },
         { id: 's2', ownerId: 'b', x: 7, y: 8, dirX: 0, dirY: 1, expiresAt: 91 },
       ],
+      outcome: { kind: 'ongoing' },
     };
     // Order matters to the simulation — kill credit reads the first shot that landed — so a reordering is a
     // real difference and must not hash the same.
@@ -184,6 +185,23 @@ describe('the state hash', () => {
   it('covers the tick', () => {
     const base = runStraightThrough(30);
     expect(hashGridWorld({ ...base, tick: base.tick + 1 })).not.toBe(hashGridWorld(base));
+  });
+
+  it('covers the match outcome, including which player won', () => {
+    /**
+     * The step READS the outcome to freeze the world, so two peers disagreeing about whether the match is over
+     * would disagree about whether anyone may still move — precisely what this check exists to surface. Omitting
+     * it from the hash failed nothing until this test existed, which is the same hole the shot list had.
+     */
+    const base = runStraightThrough(30);
+    expect(base.outcome).toEqual({ kind: 'ongoing' });
+    const won = hashGridWorld({ ...base, outcome: { kind: 'win', winnerId: 'a' } });
+    const drawn = hashGridWorld({ ...base, outcome: { kind: 'draw' } });
+    expect(won).not.toBe(hashGridWorld(base));
+    expect(drawn).not.toBe(hashGridWorld(base));
+    // And WHICH player won has to matter, not merely that someone did.
+    expect(hashGridWorld({ ...base, outcome: { kind: 'win', winnerId: 'b' } })).not.toBe(won);
+    expect(drawn).not.toBe(won);
   });
 
   it('is fine enough to see a difference a player could see', () => {

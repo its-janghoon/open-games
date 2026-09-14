@@ -101,10 +101,25 @@ export interface Shot {
   expiresAt: number;
 }
 
+/**
+ * How the match ended, or that it has not.
+ *
+ * IN the snapshot state, unlike Ringout's round tally, and the distinction is not stylistic. The tally there is
+ * read by nobody in the simulation: it changes once a round, is never rewound, and putting it in the snapshot
+ * would only give a desync something more to corrupt. This is the opposite — the step READS it to freeze the
+ * world once a match is decided, so two peers that disagree about whether the match is over would disagree about
+ * whether anyone may still move. That makes it simulation truth and it has to be restored with everything else.
+ */
+export type MatchOutcome =
+  | { kind: 'ongoing' }
+  | { kind: 'win'; winnerId: string }
+  | { kind: 'draw' };
+
 export interface GridWorld {
   tick: number;
   players: Player[];
   shots: Shot[];
+  outcome: MatchOutcome;
 }
 
 /**
@@ -136,6 +151,14 @@ export const RULES = {
   /** Ticks a shot lives before expiring. */
   shotLifetime: 90,
   respawnTicks: 90,
+  /**
+   * Kills that win the match.
+   *
+   * Five, because the round has to be finishable in a couple of minutes on a shared keyboard — the whole reason
+   * this exists is that a game nobody can finish is a tech demo, which is the bar phase 0 set for the other five
+   * games and which these two were never measured against.
+   */
+  killLimit: 5,
   /**
    * Largest distance a moving thing may advance in one collision substep, in tiles.
    *
@@ -192,6 +215,7 @@ export function createGridWorld(ids: readonly [string, string]): GridWorld {
     tick: 0,
     players: [createPlayer(ids[0], 0), createPlayer(ids[1], 1)],
     shots: [],
+    outcome: { kind: 'ongoing' },
   };
 }
 
@@ -207,6 +231,9 @@ export function cloneGridWorld(world: GridWorld): GridWorld {
     tick: world.tick,
     players: world.players.map((player) => ({ ...player })),
     shots: world.shots.map((shot) => ({ ...shot })),
+    // Spread rather than shared: the union's payload is one string today, and a shared object would leak a
+    // rewritten winner back into a snapshot the rollback still needs.
+    outcome: { ...world.outcome } as MatchOutcome,
   };
 }
 

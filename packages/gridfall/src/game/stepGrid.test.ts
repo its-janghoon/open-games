@@ -311,6 +311,99 @@ describe('shooting', () => {
   });
 });
 
+describe('winning the match', () => {
+  it('is undecided while both players are below the limit', () => {
+    const world = fresh();
+    world.players[0].kills = RULES.killLimit - 1;
+    world.players[1].kills = RULES.killLimit - 1;
+    expect(stepGrid(world, idle(), 1).outcome).toEqual({ kind: 'ongoing' });
+  });
+
+  it('declares the player who reaches the kill limit', () => {
+    // The gap this whole change closes: before it, GridWorld had no outcome at all, so kills accumulated forever
+    // and nobody ever won. A game that cannot be finished is a tech demo, which is the bar phase 0 set for the
+    // other five games and which this one was never measured against.
+    const world = fresh();
+    world.players[1].kills = RULES.killLimit;
+    expect(stepGrid(world, idle(), 1).outcome).toEqual({ kind: 'win', winnerId: 'b' });
+  });
+
+  it('calls a draw when both reach the limit on the same tick', () => {
+    // Checked for both before either is declared, so array order cannot award the match. Same rule as the
+    // fighter's double knockout and for the same reason: iteration order is not a game mechanic.
+    const world = fresh();
+    world.players[0].kills = RULES.killLimit;
+    world.players[1].kills = RULES.killLimit + 2;
+    expect(stepGrid(world, idle(), 1).outcome).toEqual({ kind: 'draw' });
+  });
+
+  it('freezes the world once decided', () => {
+    /**
+     * Freezing is why the outcome is in the SNAPSHOT rather than on the scene. Without it a shot already in flight
+     * lands after the winning kill, respawn timers keep firing, and the score keeps moving after someone has won —
+     * so the state two peers must agree on carries on changing past the end of the match.
+     */
+    let world = fresh();
+    world.players[0].kills = RULES.killLimit;
+    world = stepGrid(world, idle(), 1);
+    expect(world.outcome.kind).toBe('win');
+
+    const before = JSON.parse(JSON.stringify(world)) as GridWorld;
+    const frozen = stepGrid(
+      world,
+      new Map([['a', hold({ forward: true, fire: true, turnRight: true })]]),
+      2,
+    );
+    expect(frozen.players).toEqual(before.players);
+    expect(frozen.shots).toEqual(before.shots);
+    expect(frozen.outcome).toEqual(before.outcome);
+    // Only the tick advances, so the clock a caller reads still moves.
+    expect(frozen.tick).toBe(2);
+  });
+
+  it('does not resolve a shot already in flight after the match ends', () => {
+    /**
+     * The concrete consequence of the freeze: a bullet fired before the winning kill must not still take someone
+     * down afterwards.
+     *
+     * The tick matters and the first version of this test got it wrong. It set the score directly and checked the
+     * very next step — but judgement is the LAST step of a tick, so at the moment that step ran the outcome was
+     * still 'ongoing' and the shot correctly resolved. A shot in flight during the DECIDING tick does land; that
+     * is the same simultaneity that makes a double kill count for both. What must not happen is a shot resolving
+     * on a tick AFTER the match was decided, so the outcome has to be established by a real step first.
+     */
+    let world = fresh();
+    world.players[0].kills = RULES.killLimit;
+    world = stepGrid(world, idle(), 1);
+    expect(world.outcome.kind, 'the match must be decided before the real check').toBe('win');
+
+    world.players[1] = { ...world.players[1], x: 8.5, y: 3.5, hp: 1, respawnAt: null };
+    world.shots = [{ id: 's', ownerId: 'a', x: 8.2, y: 3.5, dirX: 1, dirY: 0, expiresAt: 999 }];
+    const after = stepGrid(world, idle(), 2);
+    expect(after.players[1].hp, 'a shot must not land on a tick after the match is over').toBe(1);
+    expect(after.shots, 'and it must not advance either').toEqual(world.shots);
+  });
+
+  it('reaches a decision by actually playing, not only by setting the score', () => {
+    // End to end through the real fire and damage path, so the limit is reachable rather than merely assertable.
+    let world = fresh();
+    world.players[0] = { ...world.players[0], x: 8, y: 3.5, angle: 0 };
+    world.players[1] = { ...world.players[1], x: 9.2, y: 3.5 };
+    for (let tick = 0; tick < 4000 && world.outcome.kind === 'ongoing'; tick += 1) {
+      // 'a' holds fire; the cooldown paces it. 'b' stands still and keeps respawning into the same spot.
+      world = stepGrid(world, new Map([['a', hold({ fire: true })]]), world.tick + 1);
+      if (world.players[1].respawnAt === null && world.players[1].x !== 9.2) {
+        world.players[1] = { ...world.players[1], x: 9.2, y: 3.5 };
+      }
+    }
+    expect(world.outcome, 'the kill limit must be reachable in play').toEqual({
+      kind: 'win',
+      winnerId: 'a',
+    });
+    expect(world.players[0].kills).toBe(RULES.killLimit);
+  });
+});
+
 describe('death and respawn', () => {
   it('brings a player back at their spawn once the deadline passes, keeping the score', () => {
     const world = fresh();

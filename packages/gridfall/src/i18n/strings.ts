@@ -44,7 +44,14 @@ export const STRINGS = {
   },
   'net.local': { en: 'Local — shared keyboard', ko: '로컬 — 키보드 공유' },
 
-  'hud.kills': { en: 'Kills {count}', ko: '킬 {count}' },
+  'hud.kills': { en: 'Kills {count}   /   {limit}', ko: '킬 {count}   /   {limit}' },
+
+  // Match result. Three keys rather than one template with a reason parameter, because Korean and English put the
+  // winner in different places and a single template would force one of them into an unnatural order.
+  'result.win': { en: '{winner} wins', ko: '{winner} 승' },
+  'result.lose': { en: '{winner} wins — you are down', ko: '{winner} 승 — 패배' },
+  'result.draw': { en: 'DRAW', ko: '무승부' },
+  'result.rematch': { en: 'Press any key for a rematch', ko: '아무 키나 눌러 재대결' },
   'hud.dead': { en: 'Down — back in {seconds}s', ko: '전사 — {seconds}초 후 복귀' },
 } as const satisfies Record<string, TrEntry>;
 

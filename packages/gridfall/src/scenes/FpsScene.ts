@@ -71,6 +71,11 @@ export class FpsScene extends Phaser.Scene {
   private language: Language = 'ko';
   private statusText!: Phaser.GameObjects.Text;
   private desyncAt: number | null = null;
+  private banner!: Phaser.GameObjects.Text;
+  private scoreText!: Phaser.GameObjects.Text;
+  private rematchHint!: Phaser.GameObjects.Text;
+  /** Set once the result has been shown, so the rematch is armed exactly once. */
+  private resultShown = false;
   private view!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Graphics;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -121,6 +126,34 @@ export class FpsScene extends Phaser.Scene {
       p2TurnRight: K.O,
       p2Fire: K.ENTER,
     }) as Record<string, Phaser.Input.Keyboard.Key>;
+
+    this.banner = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60, '', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '40px',
+        color: '#eef2ff',
+      })
+      .setOrigin(0.5)
+      .setVisible(false);
+
+    this.rematchHint = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 12, tr('result.rematch', this.language), {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '18px',
+        color: '#69ffa8',
+      })
+      .setOrigin(0.5)
+      .setVisible(false);
+
+    // The score against the limit, so a player can see how close the match is to ending — without it the kill
+    // limit exists in the rules and nowhere a player can read it.
+    this.scoreText = this.add
+      .text(24, GAME_HEIGHT - 66, '', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '16px',
+        color: '#9aa7d4',
+      })
+      .setOrigin(0, 0);
 
     this.statusText = this.add
       .text(GAME_WIDTH - 24, GAME_HEIGHT - 40, '', {
@@ -312,6 +345,43 @@ export class FpsScene extends Phaser.Scene {
     g.fillRect(screenX - width / 2, GAME_HEIGHT / 2 - height / 2, width, height);
   }
 
+  /**
+   * Show the result once and arm a rematch.
+   *
+   * Guarded by a flag because drawHud runs every frame: without it the banner would be re-set and the rematch
+   * re-armed sixty times a second, and the keypress handler would stack up sixty deep.
+   */
+  private showResult(world: GridWorld): void {
+    if (world.outcome.kind === 'ongoing') {
+      this.banner.setVisible(false);
+      this.rematchHint.setVisible(false);
+      return;
+    }
+    if (this.resultShown) return;
+    this.resultShown = true;
+
+    const key =
+      world.outcome.kind === 'draw'
+        ? 'result.draw'
+        : world.outcome.winnerId === this.role
+          ? 'result.win'
+          : 'result.lose';
+    const winner =
+      world.outcome.kind === 'draw'
+        ? ''
+        : tr(world.outcome.winnerId === 'p1' ? 'net.roleHost' : 'net.roleGuest', this.language);
+    this.banner.setText(tr(key, this.language, { winner })).setVisible(true);
+    this.rematchHint.setVisible(true);
+
+    // A short delay before arming, because the match ends on a frame where a player was still holding fire, and a
+    // rematch triggered by that keypress would skip the result screen entirely.
+    this.time.delayedCall(700, () => {
+      const again = () => this.scene.restart();
+      this.input.keyboard?.once('keydown', again);
+      this.input.once('pointerdown', again);
+    });
+  }
+
   private drawHud(_world: GridWorld): void {
     const g = this.hud;
     g.clear();
@@ -333,6 +403,12 @@ export class FpsScene extends Phaser.Scene {
     g.fillRect(24, GAME_HEIGHT - 40, barWidth, 14);
     g.fillStyle(fraction <= 0.25 ? PALETTE.hpLow : PALETTE.hpFill, 1);
     g.fillRect(24, GAME_HEIGHT - 40, barWidth * fraction, 14);
+
+    const world = this.world();
+    this.scoreText.setText(
+      tr('hud.kills', this.language, { count: this.eye().kills, limit: RULES.killLimit }),
+    );
+    this.showResult(world);
 
     this.statusText.setText(
       this.desyncAt !== null

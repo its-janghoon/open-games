@@ -8,6 +8,7 @@ import {
   wrapAngle,
   type FpsInput,
   type GridWorld,
+  type MatchOutcome,
   type Player,
   type Shot,
 } from './gridWorld';
@@ -34,6 +35,15 @@ export function stepGrid(
 ): GridWorld {
   const next = cloneGridWorld(world);
   next.tick = tick;
+  /**
+   * A decided match is frozen, and the check is FIRST so nothing else in the tick can run.
+   *
+   * Freezing matters more than it looks: without it a shot already in flight lands after the winning kill, a
+   * respawn timer keeps firing, and the score keeps moving after someone has won — so the state two peers must
+   * agree on carries on changing past the moment the match ended. Returning early makes the outcome terminal in
+   * the state rather than merely displayed by the scene.
+   */
+  if (next.outcome.kind !== 'ongoing') return next;
   // Per-tick sequence, a local rather than state: shot ids include the tick, so they stay unique.
   let shotSeq = 0;
 
@@ -99,7 +109,26 @@ export function stepGrid(
     if (killer && killer.id !== player.id) killer.kills += 1;
   }
 
+  // 6. Judge. After every death this tick has been applied, so a double kill that takes both players to the limit
+  // on the same tick is seen as the tie it is.
+  next.outcome = judgeMatch(next.players);
+
   return next;
+}
+
+/**
+ * Decide the match from the score.
+ *
+ * Both players are checked BEFORE either is declared the winner, so simultaneous kills that take both to the limit
+ * are a draw rather than a win for whoever sits first in the array. That is the same rule the fighter uses for a
+ * double knockout, and for the same reason: array order is not a game mechanic, and two peers iterating the same
+ * array must not be the thing that decides who won.
+ */
+function judgeMatch(players: readonly Player[]): MatchOutcome {
+  const reached = players.filter((player) => player.kills >= RULES.killLimit);
+  if (reached.length === 0) return { kind: 'ongoing' };
+  if (reached.length > 1) return { kind: 'draw' };
+  return { kind: 'win', winnerId: reached[0].id };
 }
 
 function turn(player: Player, input: FpsInput): void {

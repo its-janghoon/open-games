@@ -76,5 +76,10 @@ export function hashGridWorld(world: GridWorld): string {
       [s.id, s.ownerId, round(s.x), round(s.y), round(s.dirX), round(s.dirY), s.expiresAt].join(','),
     )
     .join(';');
-  return `${world.tick}|${players}|${shots}`;
+  // The outcome is hashed because the step READS it to freeze the world: two peers disagreeing about whether the
+  // match is over would disagree about whether anyone may still move, which is exactly the kind of divergence this
+  // check exists to surface.
+  const outcome =
+    world.outcome.kind === 'win' ? `win:${world.outcome.winnerId}` : world.outcome.kind;
+  return `${world.tick}|${players}|${shots}|${outcome}`;
 }
