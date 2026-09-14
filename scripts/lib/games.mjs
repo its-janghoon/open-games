@@ -115,6 +115,24 @@ export function loadGames() {
     const byStatus = STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status);
     return byStatus !== 0 ? byStatus : a.title.localeCompare(b.title, 'en');
   });
+
+  /**
+   * At most one game may be the flagship.
+   *
+   * `focus: "active"` means "the one being worked on", and the site turns it into the landing page's hero block by
+   * taking the FIRST such game in this sorted order. So a second claimant does not produce an error or two heroes —
+   * it silently moves the hero to whichever game happens to sort earlier, which is how promoting two finished games
+   * handed the flagship slot to one with no hero art and nobody noticed until the page was looked at. Sorting is by
+   * title, so the winner can even change when a game is renamed.
+   */
+  const active = games.filter((game) => game.focus === 'active');
+  if (active.length > 1) {
+    throw new Error(
+      `Only one game may have "focus": "active" — it decides the landing page's hero block. ` +
+        `Found ${active.length}: ${active.map((game) => game.slug).join(', ')}. ` +
+        'Park the ones that are finished.',
+    );
+  }
   return games;
 }
 

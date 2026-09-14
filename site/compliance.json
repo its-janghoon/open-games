@@ -15,7 +15,7 @@
       "promise": "The games contact nobody. No font CDN, no analytics, no ad call.",
       "checkedBy": "check:network, on the BUILT bundles - a dependency can emit a request the source never shows.",
       "verdict": "pass",
-      "measured": "322 built files scanned, 0 third-party request(s) found.",
+      "measured": "325 built files scanned, 0 third-party request(s) found.",
       "findings": [],
       "note": "An <a href> to the project’s own repository is not counted: it fetches nothing until a reader chooses to follow it. Counting those would have reported 13 violations where the honest number is zero."
     },
@@ -24,7 +24,7 @@
       "promise": "The games cannot take money. There is no purchase path to hide.",
       "checkedBy": "check:payments, matching processor hosts and SDK call shapes rather than payment words.",
       "verdict": "pass",
-      "measured": "322 built files scanned, 0 payment integration(s) found.",
+      "measured": "325 built files scanned, 0 payment integration(s) found.",
       "findings": [],
       "note": "The word “purchase” appears 40 times in these bundles and every one is gameplay - Arena Champions is a MOBA with an in-match item shop. A gate matching words would report 40 violations against an honest zero, so it matches integrations instead."
     },
@@ -61,7 +61,7 @@
           "firstWaitKB": 338.1,
           "totalKB": 339.3,
           "byClassKB": {
-            "js": 338.4,
+            "js": 338.5,
             "html": 0.9
           }
         },
@@ -92,7 +92,7 @@
         },
         {
           "slug": "ringout",
-          "firstWaitKB": 337.7,
+          "firstWaitKB": 337.8,
           "totalKB": 339,
           "byClassKB": {
             "js": 338.1,

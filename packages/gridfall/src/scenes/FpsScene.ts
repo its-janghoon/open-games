@@ -44,7 +44,15 @@ const COLUMN_WIDTH = GAME_WIDTH / COLUMNS;
 const PROJECTION = projectionDistance(GAME_WIDTH);
 
 const PALETTE = {
-  ceiling: 0x080b14,
+  /**
+   * Kept darker than the floor so up and down still read differently at a glance, but no longer near-black.
+   *
+   * At 0x080b14 the upper half of every frame was effectively empty: the wall tops sit below the horizon in most
+   * views, so a corridor shot was half black. It looked unfinished rather than atmospheric, which is the whole
+   * difference between a game worth listing and a tech demo. Caught while framing the landing-page thumbnail
+   * against the other five, all of which fill the card with the world.
+   */
+  ceiling: 0x151b2e,
   floor: 0x232b42,
   wall: 0x7aa2ff,
   otherPlayer: 0xffc45a,
@@ -173,6 +181,21 @@ export class FpsScene extends Phaser.Scene {
       role: () => this.role,
       networked: () => this.net !== undefined,
       columns: () => castView(this.eye(), COLUMNS),
+      /**
+       * Hide the interface, keeping the world.
+       *
+       * For the landing-page thumbnail, which shows gameplay and not the interface on all five older games. It
+       * lives here rather than in the capture script because the capture script's shared strip-UI routine walks
+       * the display list looking for sprites by size, and neither of these games HAS sprites -- both draw their
+       * whole world into one Graphics object, so a size rule would either keep everything or hide everything.
+       * Naming the interface explicitly is the only rule that can tell them apart, and only the scene knows the
+       * names.
+       */
+      hideUi: () => {
+        const ui = [this.hud, this.statusText, this.banner, this.scoreText, this.rematchHint];
+        for (const object of ui) object.setVisible(false);
+        return ui.length;
+      },
       snapshot: () =>
         new Promise<string | null>((resolve) => {
           this.game.renderer.snapshot((image) => {

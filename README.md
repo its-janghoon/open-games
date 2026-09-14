@@ -22,11 +22,11 @@ the deploy workflow are all generated from it.
 | --- | --- | --- | --- | --- |
 | [`packages/champs`](./packages/champs) | **Arena Champions** (아레나 챔피언스) | MOBA | Vite + React 18 + TypeScript + Phaser 3.80 | A three-lane 5v5 MOBA with champion select, turrets and inhibitors, minion waves, major neutral objectives, and a 2.5D vector battle view. |
 | [`packages/whiteout`](./packages/whiteout) | **Frosthold: Last Ember** (서리성채: 마지막 불씨) | Survival City-Builder | Vite + TypeScript + Phaser 3.80 | A frozen-survival city-builder: keep the central furnace burning, run idle resource buildings, and repel escalating cold-season sieges. |
+| [`packages/gridfall`](./packages/gridfall) | **Gridfall** (그리드폴) | Local-network Raycast Shooter | Vite + TypeScript + Phaser 3.80 | A two-player shooter rendered by raycasting a tile grid into vertical columns — no textures, no models, no 3D scene. Built on the same rollback core as Ringout so two people on one network can play with no server between them. |
 | [`packages/kingshot`](./packages/kingshot) | **Kingdom Rise** (킹덤 라이즈) | Strategy / Idle | Vite + TypeScript + Phaser 3.80 | A medieval kingdom builder with idle resource output, a town-center-gated building tree, troop training queues, and wave-based combat. |
 | [`packages/lastwar`](./packages/lastwar) | **LAST SQUAD** (라스트 스쿼드) | Squad Auto-Battler | Vite + TypeScript + Phaser 3.80 | A survival base-builder and squad auto-battler with a story campaign, endless horde defense, and a lane gate-runner mini-game. |
+| [`packages/ringout`](./packages/ringout) | **Ringout** (링아웃) | Two-player Geometric Fighter | Vite + TypeScript + Phaser 3.80 | A two-body fighter drawn entirely from geometric parts, with no sprite sheets and no animation frames — every pose is computed. Built to be rolled back, so two people on the same network can fight with no server between them. |
 | [`packages/wirework`](./packages/wirework) | **Wirework** (Wirework) | Top-down Ring Defense Action | Vite + TypeScript + Phaser 3.80 | Tether through a capacitor city and cut rear cooling nodes to stop autonomous siege machines. |
-| [`packages/gridfall`](./packages/gridfall) | **Gridfall** (그리드폴) _(WIP)_ | Local-network Raycast Shooter | Vite + TypeScript + Phaser 3.80 | A two-player shooter rendered by raycasting a tile grid into vertical columns — no textures, no models, no 3D scene. Built on the same rollback core as Ringout so two people on one network can play with no server between them. |
-| [`packages/ringout`](./packages/ringout) | **Ringout** (링아웃) _(WIP)_ | Two-player Geometric Fighter | Vite + TypeScript + Phaser 3.80 | A two-body fighter drawn entirely from geometric parts, with no sprite sheets and no animation frames — every pose is computed. Built to be rolled back, so two people on the same network can fight with no server between them. |
 
 <!-- games:end -->
 
@@ -155,11 +155,11 @@ configured in that game's `vite.config.ts` (production base `/open-games/<slug>/
 | `https://savagemanage.github.io/open-games/` | root landing page (`site/index.template.html` + `site/build.mjs`) |
 | `https://savagemanage.github.io/open-games/champs/` | `packages/champs` |
 | `https://savagemanage.github.io/open-games/whiteout/` | `packages/whiteout` |
+| `https://savagemanage.github.io/open-games/gridfall/` | `packages/gridfall` |
 | `https://savagemanage.github.io/open-games/kingshot/` | `packages/kingshot` |
 | `https://savagemanage.github.io/open-games/lastwar/` | `packages/lastwar` |
-| `https://savagemanage.github.io/open-games/wirework/` | `packages/wirework` |
-| `https://savagemanage.github.io/open-games/gridfall/` | `packages/gridfall` |
 | `https://savagemanage.github.io/open-games/ringout/` | `packages/ringout` |
+| `https://savagemanage.github.io/open-games/wirework/` | `packages/wirework` |
 
 <!-- urls:end -->
 

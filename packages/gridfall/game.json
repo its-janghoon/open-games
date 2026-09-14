@@ -9,7 +9,8 @@
     "typescript",
     "phaser3"
   ],
-  "status": "wip",
-  "focus": "active",
-  "focusNote": "Phase 7: the rollback core against a 3D-looking world whose state is still plain data."
+  "status": "playable",
+  "focus": "parked",
+  "focusNote": "Complete rollback state: a kill limit that ends the match, judged for both players before either wins.",
+  "thumbnail": "thumb.png"
 }

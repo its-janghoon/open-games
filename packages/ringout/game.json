@@ -9,7 +9,8 @@
     "typescript",
     "phaser3"
   ],
-  "status": "wip",
-  "focus": "active",
-  "focusNote": "Phase 6: the rollback core's first complete WorldState \u2014 a fighter's whole world is two bodies and a hitbox set."
+  "status": "playable",
+  "focus": "parked",
+  "focusNote": "Complete rollback state: rounds, a decided outcome and a frozen result screen.",
+  "thumbnail": "thumb.png"
 }

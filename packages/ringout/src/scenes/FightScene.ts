@@ -156,6 +156,24 @@ export class FightScene extends Phaser.Scene {
         return poseFor(state.fighters[index], state.tick);
       },
       tick: () => this.session.stats().tick,
+      /**
+       * Hide the interface, keeping the world.
+       *
+       * For the landing-page thumbnail, which shows gameplay and not the interface on all five older games. It
+       * lives here rather than in the capture script because the capture script's shared strip-UI routine walks
+       * the display list looking for sprites by size, and neither of these games HAS sprites -- both draw their
+       * whole world into one Graphics object, so a size rule would either keep everything or hide everything.
+       * Naming the interface explicitly is the only rule that can tell them apart, and only the scene knows the
+       * names.
+       */
+      hideUi: () => {
+        const ui = [this.hud, this.banner, this.tallyText, this.hint];
+        for (const object of ui) object.setVisible(false);
+        // Draw once more so the frame reflects the hiding: the fight is paused during a capture and a paused
+        // scene does not re-run update, so without this the last drawn frame still carries the interface.
+        this.draw();
+        return ui.length;
+      },
       snapshot: () =>
         new Promise<string | null>((resolve) => {
           this.game.renderer.snapshot((image) => {
