@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { GameStore } from './GameStore';
+import type { ResourceBag } from '../types';
+import type { KeyValueStorage } from './SaveManager';
 import {
   TUTORIAL_STEPS,
   firstStep,
@@ -33,8 +35,22 @@ describe('lastwar opening is completable', () => {
   const STEP_MS = 1000;
   const MINUTES = 10;
 
+  /** GameStore's constructor is private; tests build it with injected storage. */
+  const memoryStorage = (): KeyValueStorage => {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+    };
+  };
+
+  /** Sum a ResourceBag without letting its values widen to unknown. */
+  const total = (bag: ResourceBag): number =>
+    Object.values(bag).reduce<number>((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+
   const play = (seconds: number) => {
-    const store = new GameStore();
+    const store = GameStore.createWith(memoryStorage());
     const built: string[] = [];
     let starvedTicks = 0;
     let now = 0;
@@ -53,8 +69,7 @@ describe('lastwar opening is completable', () => {
       }
 
       if (!acted) {
-        const rates = store.productionRates();
-        const income = Object.values(rates).reduce((a, b) => a + (b ?? 0), 0);
+        const income = total(store.productionRates());
         if (income <= 0) starvedTicks += 1;
         else starvedTicks = 0;
       }
@@ -68,7 +83,7 @@ describe('lastwar opening is completable', () => {
   });
 
   it('earns something over the window rather than standing still', () => {
-    const before = new GameStore().resources();
+    const before = GameStore.createWith(memoryStorage()).resources();
     const { store } = play(60 * MINUTES);
     const after = store.resources();
     const grew = Object.keys(after).some(
