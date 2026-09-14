@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { SceneKeys, PALETTE, CANVAS, RESOURCE_ORDER } from '../config/GameConfig';
+import { SceneKeys, PALETTE, CANVAS, RESOURCE_ORDER, HUD } from '../config/GameConfig';
+import { stackRows } from '../config/HudLayout';
 import { TextureKeys, AudioKeys, BUILDING_TEXTURE_BY_KIND, RESOURCE_ICON_FRAME } from '../config/AssetKeys';
 import { BUILDING_ORDER, buildingDef, isProducer } from '../config/BuildingConfig';
 import type { BuildingKind, ResourceKind } from '../types';
@@ -322,27 +323,62 @@ export class TownScene extends Phaser.Scene {
 
   private buildTopBar(): void {
     this.topLayer = this.add.container(0, 0).setDepth(5);
-    const bar = this.add.rectangle(0, 0, CANVAS.WIDTH, 44, PALETTE.PANEL, 0.92).setOrigin(0, 0);
+    const bar = this.add.rectangle(0, 0, CANVAS.WIDTH, HUD.BAR_MIN_HEIGHT, PALETTE.PANEL, 0.92).setOrigin(0, 0);
     bar.setStrokeStyle(2, PALETTE.STONE_DARK);
     this.topLayer.add(bar);
 
     const slotW = CANVAS.WIDTH / RESOURCE_ORDER.length;
+    // The amount and its rate line are stacked from their MEASURED heights, not from
+    // hand-picked y values: an 18px bold amount renders about 24px tall, so the old
+    // 18px step put the rate line 7px inside it.
+    // Annotated: HUD is `as const`, so an inferred type would be the literal 44 and
+    // could not accumulate.
+    let contentBottom: number = HUD.BAR_MIN_HEIGHT;
     RESOURCE_ORDER.forEach((res, i) => {
       const x = slotW * i + 20;
-      const icon = this.add.image(x, 22, TextureKeys.ResourceIcons, RESOURCE_ICON_FRAME[res]).setOrigin(0.5).setScale(1.4);
-      const amount = this.add.text(x + 20, 10, '0', textStyle(18, { fontStyle: 'bold' })).setOrigin(0, 0);
-      const rate = this.add.text(x + 20, 28, '', textStyle(11, { color: PALETTE.SUCCESS_CSS })).setOrigin(0, 0);
+      const amount = this.add.text(x + 20, 0, '0', textStyle(18, { fontStyle: 'bold' })).setOrigin(0, 0);
+      const rate = this.add.text(x + 20, 0, '', textStyle(11, { color: PALETTE.SUCCESS_CSS })).setOrigin(0, 0);
+      // A deferred (empty) rate measures 0, so give the stack a floor.
+      const rows = stackRows([amount.height, Math.max(rate.height, 13)], {
+        top: HUD.BAR_PAD,
+        gap: HUD.ROW_GAP_TIGHT,
+      });
+      amount.setY(rows[0].top);
+      rate.setY(rows[1].top);
+      contentBottom = Math.max(contentBottom, rows[1].bottom + HUD.BAR_PAD);
+
+      const icon = this.add
+        .image(x, rows[0].centre, TextureKeys.ResourceIcons, RESOURCE_ICON_FRAME[res])
+        .setOrigin(0.5)
+        .setScale(1.4);
       this.topLayer.add([icon, amount, rate]);
       this.resourceWidgets.push({ res, amount, rate });
     });
+    // Grow the bar to whatever its content actually needs rather than trusting a
+    // fixed 44px to be enough in every language.
+    bar.height = contentBottom;
 
-    const hint = Menu.label(this, CANVAS.WIDTH / 2, 60, tr('town.hint'), 12, 0.55).setColor(PALETTE.MUTED_CSS);
+    // Everything below the bar is one stack too. Three rows previously sat at y 52,
+    // 60 and 70 - 18px of space for three rows of 11-13px text - which is where the
+    // remaining collisions came from.
+    const probe = this.add.text(0, -999, 'Ag', textStyle(13, { fontStyle: 'bold' })).setOrigin(0, 0);
+    const rowH = Math.max(probe.height, 16);
+    const warnProbe = this.add.text(0, -999, 'Ag', textStyle(11, { fontStyle: 'bold' })).setOrigin(0, 0);
+    const warnH = Math.max(warnProbe.height, 14);
+    probe.destroy();
+    warnProbe.destroy();
+    const below = stackRows([rowH, rowH, warnH], {
+      top: contentBottom + HUD.ROW_GAP,
+      gap: HUD.ROW_GAP,
+    });
+
+    const hint = Menu.label(this, CANVAS.WIDTH / 2, below[1].centre, tr('town.hint'), 12, 0.55).setColor(PALETTE.MUTED_CSS);
     this.topLayer.add(hint);
 
     // Town-defense readout: the aggregate wall/watchtower defense the combat
     // resolver factors into every raid. Sits top-right, updated each frame.
     this.defenseLabel = this.add
-      .text(CANVAS.WIDTH - 12, 52, '', textStyle(13, { color: PALETTE.ACCENT_CSS, fontStyle: 'bold' }))
+      .text(CANVAS.WIDTH - 12, below[0].centre, '', textStyle(13, { color: PALETTE.ACCENT_CSS, fontStyle: 'bold' }))
       .setOrigin(1, 0.5)
       .setDepth(5);
 
@@ -350,18 +386,18 @@ export class TownScene extends Phaser.Scene {
     // production is throttled. A labelled bar sits top-left just under the
     // resource bar, with a prominent low-warmth warning when the fire dies.
     this.warmthLabel = this.add
-      .text(20, 52, '', textStyle(13, { color: PALETTE.ACCENT_CSS, fontStyle: 'bold' }))
+      .text(20, below[0].centre, '', textStyle(13, { color: PALETTE.ACCENT_CSS, fontStyle: 'bold' }))
       .setOrigin(0, 0.5)
       .setDepth(5);
-    this.warmthBar = Menu.progressBar(this, 150, 52, 120, 10, PALETTE.ACCENT);
+    this.warmthBar = Menu.progressBar(this, 150, below[0].centre, 120, 10, PALETTE.ACCENT);
     this.warmthBar.container.setDepth(5);
     this.warmthWarning = this.add
-      .text(150, 70, '', textStyle(11, { color: PALETTE.DANGER_CSS, fontStyle: 'bold' }))
+      .text(150, below[2].centre, '', textStyle(11, { color: PALETTE.DANGER_CSS, fontStyle: 'bold' }))
       .setOrigin(0, 0.5)
       .setDepth(5)
       .setVisible(false);
     this.saveStatusLabel = this.add
-      .text(CANVAS.WIDTH - 12, 70, '', textStyle(11, { color: PALETTE.DANGER_CSS, fontStyle: 'bold' }))
+      .text(CANVAS.WIDTH - 12, below[2].centre, '', textStyle(11, { color: PALETTE.DANGER_CSS, fontStyle: 'bold' }))
       .setOrigin(1, 0.5)
       .setDepth(6)
       .setInteractive({ useHandCursor: true });

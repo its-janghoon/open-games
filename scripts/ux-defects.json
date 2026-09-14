@@ -18,9 +18,19 @@
       "game": "kingshot",
       "scene": "TownScene",
       "severity": "high",
-      "what": "Four HUD text rows collide in the top-left corner. Measured 8 overlapping visible text pairs, the worst at 67%.",
-      "measured_cause": "Rows are placed at y=10, 28, 40 and 60 - steps of 18 to 20px - while the rendered text is taller than the step. Same root shape as the panel-bounds finding: a spacing constant smaller than the content it has to separate. Worst pairs: '2497/5000'@[40,10] vs '+0.1/초 순 0.1/초'@[40,28]; '+0.1/초...'@[40,28] vs '온기 0/100...'@[20,40]; '온기 0/100...'@[20,40] vs '화롯불 꺼져감! 목재 확보'@[150,60].",
-      "not_a_gate_yet": "A build gate would need a rule that separates this from a modal legitimately covering content. Depth does not separate them: '방어 0 · 웨이브 1/20' vs '저장됨' sit at depths 5 and 6 and ARE a real collision, while a modal over a label is a large depth gap. Same-depth-only is too narrow, any-depth is too broad."
+      "status": "CLOSED",
+      "what": "Four HUD text rows collided in the top-left corner. Measured 8 overlapping visible text pairs, the worst at 67%.",
+      "measured_cause": "Rows were placed at y=10, 28, 40 and 60 - steps of 18 to 20px - while the text is taller than the step. The Korean face at 18px bold measures 30px tall, not the ~24 a Latin face would suggest, so the 18px step put the rate line 12px inside the amount above it.",
+      "fix": "config/HudLayout.stackRows computes every row's y from the MEASURED height of the row above, and the resource bar grows to fit its content instead of trusting a fixed 44px. HudLayout.test.ts pins the property (no row overlaps the next, for any heights and gaps) rather than coordinates.",
+      "verified": "Re-measured on the rebuilt game: overlapping visible text pairs fell from 8 to 2, and the two that remain are the separate tooltip defect below."
+    },
+    {
+      "id": "kingshot-tooltip-over-labels",
+      "game": "kingshot",
+      "scene": "TownScene",
+      "severity": "medium",
+      "what": "The build-hint tooltip overlaps building lock labels: 41% against '잠김 (중앙 청사 Lv.3 필요)'@[707,347] and 6% against another at [477,372].",
+      "measured_cause": "The tooltip is placed relative to the building it points at, with no awareness of the lock labels that sit at the same band. Distinct from the HUD row defect - this is one floating element versus a row of static labels, not a spacing constant."
     },
     {
       "id": "whiteout-banner-over-label",

@@ -25,6 +25,24 @@ export const CANVAS = {
 } as const;
 
 /**
+ * Vertical rhythm for the town HUD. SPACING only - every row's y is computed from
+ * measured text heights via config/HudLayout, because hand-picked coordinates are
+ * what let four rows collide in the top-left corner: an 18px bold amount renders
+ * about 24px tall but its rate line was placed 18px below it, and three more rows
+ * sat at y 52, 60 and 70.
+ */
+export const HUD = {
+  /** Floor for the resource bar. It grows if its content needs more room. */
+  BAR_MIN_HEIGHT: 44,
+  /** Padding inside the resource bar, above the first row and below the last. */
+  BAR_PAD: 3,
+  /** Gap between an amount and its rate line, which read as one unit. */
+  ROW_GAP_TIGHT: 1,
+  /** Gap between independent rows below the bar. */
+  ROW_GAP: 4,
+} as const;
+
+/**
  * Physics tuning (arcade). This is a top-down / management view, so there is no
  * gravity; any in-battle movement is planar and driven directly by velocity.
  */
