@@ -1,4 +1,11 @@
-import { distance, type Unit, type Vec2 } from './combat';
+import {
+  advanceAttackCooldown,
+  distance,
+  tickCooldowns,
+  type CooldownState,
+  type Unit,
+  type Vec2,
+} from './combat';
 
 /**
  * The pure world-advance arithmetic, extracted from BattleScene.
@@ -79,4 +86,76 @@ export function moveUnitToward(
   unit.pos.x = bounds ? clamp(nextX, bounds.minX, bounds.maxX) : nextX;
   unit.pos.y = bounds ? clamp(nextY, bounds.minY, bounds.maxY) : nextY;
   return travel;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Timers                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Advance one side's per-tick timers.
+ *
+ * Worth stating what this does NOT do: it does not reimplement anything. Measured
+ * before writing it, combat.ts already owns the only implementation of both halves -
+ * advanceAttackCooldown and tickCooldowns - and BattleScene already calls those. So
+ * extracting them again would have produced a second copy of arithmetic that has one,
+ * which is the exact mistake the movement slice avoided.
+ *
+ * What this adds is a single per-side entry point a headless step can call, in one
+ * place, in a fixed order. The scene keeps its own two call sites where they are: they
+ * sit ~440 lines apart in its frame, and although the fields are disjoint (verified: no
+ * read of attackCdRemaining, canBasicAttack or any cds field occurs between them),
+ * moving one would be a behaviour change made for tidiness rather than for a reason.
+ */
+export function advanceTimers(
+  units: readonly Unit[],
+  cooldowns: readonly CooldownState[],
+  dt: number,
+): void {
+  for (const unit of units) advanceAttackCooldown(unit, dt);
+  for (const cds of cooldowns) tickCooldowns(cds, dt);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Snapshots                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The state a rollback has to snapshot and restore.
+ *
+ * Plain data, and that is the requirement rather than a style preference: rewinding
+ * means restoring an earlier state exactly, so anything holding a reference to a render
+ * object, a timer, or a scene cannot be rewound. Unit is already a plain type, which is
+ * what made this slice possible at all.
+ *
+ * Deliberately incomplete. It covers what the extracted step advances - positions and
+ * timers - and NOT effects, projectiles, structures or gold. Declaring a full world
+ * state now would be a promise the step cannot keep, and a rollback over a state that
+ * misses a field does not fail: it silently desyncs on that field.
+ */
+export interface WorldState {
+  tick: number;
+  units: Unit[];
+  /** Ability cooldowns per participant id. */
+  cooldowns: Record<string, CooldownState>;
+}
+
+/**
+ * A fully independent copy.
+ *
+ * Written explicitly rather than with structuredClone or a JSON round-trip because both
+ * hide bugs this contract exists to prevent: JSON silently drops undefined and turns a
+ * Map into {}, and either would produce a snapshot that looks fine and restores wrong.
+ * The test that matters is that mutating the copy cannot touch the original - the
+ * contract RollbackSession depends on, and the one my own reference simulation failed to
+ * exercise last cycle because it never mutated its state.
+ */
+export function cloneWorldState(state: WorldState): WorldState {
+  return {
+    tick: state.tick,
+    units: state.units.map((unit) => ({ ...unit, pos: { x: unit.pos.x, y: unit.pos.y } })),
+    cooldowns: Object.fromEntries(
+      Object.entries(state.cooldowns).map(([id, cds]) => [id, { ...cds }]),
+    ),
+  };
 }
