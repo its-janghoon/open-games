@@ -1,0 +1,42 @@
+{
+  "goal": {
+    "x": 1105.2,
+    "y": 871.2
+  },
+  "elapsedSeconds": 1.5025999999940396,
+  "before": {
+    "pos": {
+      "x": 205.2,
+      "y": 571.2
+    },
+    "moveSpeed": 66,
+    "attackCdRemaining": 0
+  },
+  "cdsBefore": {
+    "Q": 0,
+    "W": 0,
+    "E": 0,
+    "R": 0
+  },
+  "after": {
+    "pos": {
+      "x": 299.1196465070008,
+      "y": 602.5065488356665
+    },
+    "moveSpeed": 66,
+    "attackCdRemaining": 0
+  },
+  "cdsAfter": {
+    "Q": 0,
+    "W": 0,
+    "E": 0,
+    "R": 0
+  },
+  "context": {
+    "slowFactor": 0,
+    "buffFraction": 0,
+    "pinned": false,
+    "note": "captured at match start, before any ability or buff is active"
+  },
+  "_why": "A real capture from a live champs match, kept so the differential can be re-run without a browser. Recapture with scripts/lib/capture-world-step.js over CDP when the scene's movement changes."
+}
