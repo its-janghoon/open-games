@@ -105,15 +105,21 @@ export interface GridWorld {
   tick: number;
   players: Player[];
   shots: Shot[];
-  /**
-   * Next per-tick sequence number for shot ids.
-   *
-   * In the state for the same reason champs' insertion counter is: restore the shots but not the counter
-   * and a replayed tick mints an id some surviving shot already holds, so two distinct projectiles become
-   * indistinguishable and any logic keyed on the id silently merges them.
-   */
-  nextShotSeq: number;
 }
+
+/**
+ * A note on what is NOT here: a shot-sequence counter.
+ *
+ * The first version carried one, copied from champs' insertion counter with champs' reasoning attached —
+ * restore the queue without the counter and a replayed tick mints an id something already holds. Injection
+ * proved that reasoning does not transfer: deliberately dropping the field from the clone failed no test,
+ * because the sequence is RESET at the top of every tick, so it never crosses a snapshot boundary at all.
+ * champs' counter is monotonic for a whole match and genuinely is state; this one is per-tick scratch, and
+ * shot ids stay unique because the tick is part of them. So it lives as a local in stepGrid.
+ *
+ * The lesson is the one worth keeping: a pattern that was right somewhere else still has to be checked
+ * against the code it is being copied into.
+ */
 
 export const RULES = {
   moveSpeed: 0.075,
@@ -186,7 +192,6 @@ export function createGridWorld(ids: readonly [string, string]): GridWorld {
     tick: 0,
     players: [createPlayer(ids[0], 0), createPlayer(ids[1], 1)],
     shots: [],
-    nextShotSeq: 0,
   };
 }
 
@@ -202,7 +207,6 @@ export function cloneGridWorld(world: GridWorld): GridWorld {
     tick: world.tick,
     players: world.players.map((player) => ({ ...player })),
     shots: world.shots.map((shot) => ({ ...shot })),
-    nextShotSeq: world.nextShotSeq,
   };
 }
 

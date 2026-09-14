@@ -34,7 +34,8 @@ export function stepGrid(
 ): GridWorld {
   const next = cloneGridWorld(world);
   next.tick = tick;
-  next.nextShotSeq = 0;
+  // Per-tick sequence, a local rather than state: shot ids include the tick, so they stay unique.
+  let shotSeq = 0;
 
   // 1. Respawn.
   next.players.forEach((player, index) => {
@@ -61,8 +62,8 @@ export function stepGrid(
     const input = inputs.get(player.id);
     if (!input?.fire || tick < player.fireReadyAt) continue;
     player.fireReadyAt = tick + RULES.fireCooldown;
-    next.shots.push(spawnShot(player, tick, next.nextShotSeq));
-    next.nextShotSeq += 1;
+    next.shots.push(spawnShot(player, tick, shotSeq));
+    shotSeq += 1;
   }
 
   // 4. Advance shots and resolve hits. Damage is collected first and applied afterwards, so a shot cannot

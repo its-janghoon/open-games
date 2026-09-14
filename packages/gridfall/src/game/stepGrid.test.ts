@@ -68,12 +68,11 @@ describe('state contract', () => {
     copy.players[0].kills = 7;
     copy.shots[0].x = -99;
     copy.shots.push({ id: 'y', ownerId: 'b', x: 0, y: 0, dirX: 0, dirY: 1, expiresAt: 9 });
-    copy.nextShotSeq = 42;
+
     expect(original.players[0].x).not.toBe(-99);
     expect(original.players[0].kills).toBe(0);
     expect(original.shots[0].x).toBe(5);
     expect(original.shots).toHaveLength(1);
-    expect(original.nextShotSeq).toBe(0);
   });
 
   it('does not mutate the world it was given', () => {
