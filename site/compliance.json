@@ -67,12 +67,12 @@
         },
         {
           "slug": "kingshot",
-          "firstWaitKB": 378.5,
-          "totalKB": 1382.9,
+          "firstWaitKB": 379,
+          "totalKB": 1383.5,
           "byClassKB": {
             "font": 492.9,
             "audio": 430,
-            "js": 376.6,
+            "js": 377.1,
             "image": 81,
             "html": 2.4
           }

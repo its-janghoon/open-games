@@ -12,14 +12,6 @@
   ],
   "open": [
     {
-      "id": "kingshot-tooltip-over-labels",
-      "game": "kingshot",
-      "scene": "TownScene",
-      "severity": "medium",
-      "what": "The build-hint tooltip overlaps building lock labels: 41% against '잠김 (중앙 청사 Lv.3 필요)'@[707,347] and 6% against another at [477,372].",
-      "measured_cause": "The tooltip is placed relative to the building it points at, with no awareness of the lock labels that sit at the same band. Distinct from the HUD row defect - this is one floating element versus a row of static labels, not a spacing constant."
-    },
-    {
       "id": "korean-font-subsetting",
       "game": "champs, lastwar, kingshot",
       "severity": "high",
@@ -31,20 +23,15 @@
       "verified": "All four faces still report status 'loaded' in the browser and Korean renders correctly ('아레나 챔피언스'), so dropping the preload did not cost the typography."
     },
     {
-      "id": "new-games-have-no-audio",
-      "game": "ringout, gridfall",
-      "severity": "medium",
-      "what": "Both new games are silent: zero audio files and no audio code at all.",
-      "measured_cause": "Measured across all seven packages: wirework 30 files/376 KB, whiteout 24/484 KB, kingshot 14/430 KB, lastwar 30/346 KB ship audio. champs ships no FILES but has src/game/audio.ts and synthesises through WebAudio. ringout and gridfall have neither files nor audio code, so they are not synthesising either — they are simply silent. That was defensible while both were status wip; they are now playable and listed beside five games that make sound.",
-      "note": "Synthesised audio is the cheaper route here and there is a precedent in the repo: champs pays 0 bytes for it. A file-based approach would add to a 357 KB cold-load budget for two games that currently have the smallest payloads of the seven."
-    },
-    {
       "id": "landing-page-has-no-korean-webfont",
       "game": "site",
       "severity": "medium",
       "what": "The catalogue renders Korean titles and summaries with no Korean webfont, so they fall back to whatever the device happens to have.",
       "measured_cause": "25 Korean characters appear only in game.json titleKo/summaryKo, which the landing page renders rather than any game. site/shell.css names \"Noto Sans KR\" in --sans, which helps only on a device that already has it installed. On a low-end Android without a Korean face that is tofu on the storefront — the first page a player sees.",
-      "why_not_done": "Adding a face to the landing page is a transfer-size decision for the user, and it is the one page every visitor loads. Subsetting is blocked, so the honest options are a full face or nothing."
+      "why_not_done": "Adding a face to the landing page is a transfer-size decision for the user, and it is the one page every visitor loads. Subsetting is blocked, so the honest options are a full face or nothing.",
+      "status": "PARTIAL - fallback widened, webfont still blocked",
+      "fix_so_far": "site/shell.css now names Apple SD Gothic Neo, Noto Sans KR, Malgun Gothic and Nanum Gothic explicitly in --sans, plus D2Coding and NanumGothicCoding in --mono, instead of trusting one Korean name. Costs nothing: no webfont is loaded and a family the device lacks is skipped. This raises the odds that a device resolves SOMETHING Korean; it does not guarantee it.",
+      "still_blocked": "An actual webfont. Subsetting is blocked on this host, so the only options were a full Korean face on the one page every visitor loads — roughly half a megabyte — or nothing. On a project whose premise is reaching players on metered data that is the user's call, not a change to make quietly."
     },
     {
       "id": "champs-minion-waves-scene-only",
@@ -52,7 +39,11 @@
       "severity": "high",
       "what": "Minion waves are still advanced only inside BattleScene, so champs' rollback netcode is proven for champion combat, gold and structures but not for a whole match.",
       "measured_cause": "The scene advances them in maybeSpawnWaves / processWaveSpawns / updateMinions. Harder than the gold and structure slices because the minion set is DYNAMIC: spawning creates entities, so the state is a growing list rather than a fixed record, and ids must be generated deterministically or two peers disagree about which minion is which.",
-      "note": "Check first whether any existing counter is reset per tick — gridfall's nextShotSeq turned out NOT to be state at all — versus genuinely monotonic like champs' own nextInsertionOrder."
+      "note": "Check first whether any existing counter is reset per tick — gridfall's nextShotSeq turned out NOT to be state at all — versus genuinely monotonic like champs' own nextInsertionOrder.",
+      "status": "PARTIAL - schedule extracted, bodies still scene-only",
+      "fix_so_far": "rift/waveSchedule.ts holds the SCHEDULE as snapshot state: spawnedWaves, a pending queue with ABSOLUTE dueAt, and a monotonic nextOrder. It follows the impact queue's design because it has the same shape, and nextOrder is state for the same reason nextInsertionOrder is — restore the queue without the counter and a later spawn reuses a number a queued entry still holds, so two spawns sharing a deadline become indistinguishable. nextWaveNumberAt and laneWaveComposition were already pure, so scheduleDueWaves is the record-level step they never had; the scene now calls it and its own spawnWave is gone.",
+      "still_scene_only": "Minion BODIES — movement, combat and death, in updateMinions. So which minions exist and when is now rewindable, but what they then do is not, and a whole champs match is still not rollback-proven.",
+      "verified": "A real 51-second match spawns minions in all three lanes for both teams (visible on the minimap), turrets 11/11 and 10/11, gold accruing at 2.04/s. Frame at /home/ubuntu/recordings/phase7/champs-waves.png."
     }
   ],
   "checked_and_clean": [
@@ -63,6 +54,30 @@
   ],
   "measurement_trap_recorded": "The first overlap pass reported 324 pairs in kingshot and 39 in whiteout. Nearly all were text inside CLOSED panels still sitting in the display list: the probe tested each object's own .visible but not its ancestors'. Walking the parentContainer chain for visibility and alpha, and dropping offscreen text, brought the honest counts to 8 and 2. Any future display-list rule must use effective visibility, not .visible.",
   "closed_in_phase_2": [
+    {
+      "id": "new-games-have-no-audio",
+      "game": "ringout, gridfall",
+      "severity": "medium",
+      "what": "Both new games are silent: zero audio files and no audio code at all.",
+      "measured_cause": "Measured across all seven packages: wirework 30 files/376 KB, whiteout 24/484 KB, kingshot 14/430 KB, lastwar 30/346 KB ship audio. champs ships no FILES but has src/game/audio.ts and synthesises through WebAudio. ringout and gridfall have neither files nor audio code, so they are not synthesising either — they are simply silent. That was defensible while both were status wip; they are now playable and listed beside five games that make sound.",
+      "note": "Synthesised audio is the cheaper route here and there is a precedent in the repo: champs pays 0 bytes for it. A file-based approach would add to a 357 KB cold-load budget for two games that currently have the smallest payloads of the seven.",
+      "status": "CLOSED",
+      "fix": "shared/cueSynth.ts: a small WebAudio cue synth, following champs' precedent of shipping no audio FILES at all. Ten cues as a data table so nothing collides and nothing clips; costs source bytes only, and check:budget passes unchanged against the 357 KB cold-load ceiling. champs' own 476-line module with mix buses and persisted settings was deliberately not copied — these two games need a handful of cues and neither persists settings, because both sibling persistence layers use a strict allowlist that silently drops unlisted fields.",
+      "load_bearing_decision": "Cues fire by OBSERVING state transitions in draw(), never from inside the step. A rollback replays ticks, so a cue emitted inside stepGrid or stepFight would sound again for every re-simulated tick and lag would turn one shot into a stutter. Every comparison is directional: a rewind moves the observed state backwards, so hp RISING fires nothing. The observed-state field is not in the snapshot and must not be — a rollback must not rewind what the player already heard.",
+      "verified": "In a real browser by counting oscillators, not by asserting an AudioContext exists — which would pass even if every cue were silent. A live match: 0 cues before firing, 34 during, at distinct starting frequencies of 220, 300, 660 and 900 Hz — respawn, death, shoot, hit — matching the table exactly. matchWin at 400 Hz correctly did NOT fire, the sample ending at 3 kills of 5 with the outcome ongoing."
+    },
+    {
+      "id": "kingshot-tooltip-over-labels",
+      "game": "kingshot",
+      "scene": "TownScene",
+      "severity": "medium",
+      "what": "The build-hint tooltip overlaps building lock labels: 41% against '잠김 (중앙 청사 Lv.3 필요)'@[707,347] and 6% against another at [477,372].",
+      "measured_cause": "The tooltip is placed relative to the building it points at, with no awareness of the lock labels that sit at the same band. Distinct from the HUD row defect - this is one floating element versus a row of static labels, not a spacing constant.",
+      "status": "CLOSED",
+      "fix": "config/HintPlacement.placeHint takes the obstacles as DATA and returns the first of six ranked candidate positions that overlaps none of them, clamped inside the screen. TownScene feeds it the MEASURED getBounds() of every visible, non-empty level badge — the same discipline HudLayout used for the HUD rows, because the Korean face is taller than a Latin one suggests and any position derived from an assumed text height is wrong before it is written. HintPlacement.test.ts pins the property (clears every obstacle it is given) rather than coordinates.",
+      "verified": "Re-measured on the rebuilt game with the ancestor-visibility-correct probe: TownScene reports 27 visible text objects and ZERO overlapping pairs, down from the 2 that remained after the HUD row fix. Frame at /home/ubuntu/recordings/phase2/kingshot-hint-fixed.png.",
+      "also_learned": "The first version of the fallback test blocked two of the six candidates and asserted a least-overlap choice that never happened, because the other four were still clear. A test that cannot reach the branch it names proves nothing about it, so the candidate list is exported and the test blocks all six."
+    },
     {
       "id": "kingshot-hud-rows",
       "game": "kingshot",

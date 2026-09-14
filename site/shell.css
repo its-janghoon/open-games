@@ -20,8 +20,24 @@
         --dim: #9aa3bf;
         --faint: #626a86;
         --accent: #45e0c8;
-        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
-        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        /*
+         * Korean faces are named EXPLICITLY, and more than one of them.
+         *
+         * 25 Korean characters appear only in each game's titleKo / summaryKo, which this page renders rather than any
+         * game — so the catalogue is the one surface whose Korean depends entirely on the device. "Noto Sans KR" alone
+         * covers a device that happens to have it; the added names cover the common cases it misses (Apple, Windows,
+         * and the Nanum family that ships widely on Android and Linux). Costs nothing: no webfont is loaded, and a
+         * family the device does not have is simply skipped.
+         *
+         * A webfont would be the real fix and is deliberately NOT here. Subsetting is blocked on this host, so the
+         * only options were a full Korean face — roughly half a megabyte on the one page every single visitor loads —
+         * or nothing. On a project whose whole premise is reaching players on metered data, that is not a trade to
+         * make quietly.
+         */
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Nanum Gothic", sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+          "D2Coding", "NanumGothicCoding", monospace;
       }
       * {
         box-sizing: border-box;

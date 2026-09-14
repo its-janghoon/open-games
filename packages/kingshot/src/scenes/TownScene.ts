@@ -20,6 +20,7 @@ import { announceStatus, closeAccessibleModal, openAccessibleModal, refreshAcces
 import { onViewportRefit, type VisibleWorldRect } from '@open-games/shared';
 import { CombatSystem } from '../systems/CombatSystem';
 import { TOTAL_WAVES, waveComposition } from '../config/WaveConfig';
+import { placeHint } from '../config/HintPlacement';
 
 /** Fixed layout position for each building sprite on the town map. */
 const BUILDING_LAYOUT: Record<BuildingKind, { x: number; y: number; scale: number }> = {
@@ -271,8 +272,12 @@ export class TownScene extends Phaser.Scene {
 
     // A persistent early nudge toward WOOD: a small caption under the Lumber
     // Mill telling a new player to build it first. Hidden the moment the mill
-    // is standing (see refreshBuildingBadges). Kept off to the side/below the
-    // sprite so it never overlaps the overhead level badge.
+    // is standing (see refreshBuildingBadges).
+    //
+    // Its POSITION is no longer a fixed offset. It used to sit at y + 46, chosen to clear the mill's own overhead
+    // badge — which it did, while overlapping a different building's lock label at 41%. A fixed offset can only avoid
+    // the obstacle its author was thinking about, so the position is now computed against the measured bounds of every
+    // badge on screen (see repositionWoodHint).
     const mill = BUILDING_LAYOUT.lumber_mill;
     this.woodHint = this.add
       .text(mill.x, mill.y + 46, tr('town.woodHint'), textStyle(11, {
@@ -288,9 +293,42 @@ export class TownScene extends Phaser.Scene {
       .setVisible(false);
   }
 
+  /**
+   * Put the wood hint somewhere that covers no label.
+   *
+   * Driven by MEASURED bounds, which is the same discipline HudLayout used to fix the colliding HUD rows: the Korean
+   * face at 13px bold is taller than a Latin face suggests, so any position derived from an assumed text height is
+   * wrong before it is written. getBounds() reports what was actually rendered.
+   *
+   * Only VISIBLE badges count as obstacles. A badge with empty text still has bounds, and treating those as blockers
+   * would push the hint away from space that is actually free.
+   */
+  private repositionWoodHint(): void {
+    if (!this.woodHint.visible) return;
+    const obstacles = this.markers
+      .filter((marker) => marker.levelBadge.visible && marker.levelBadge.text.trim() !== '')
+      .map((marker) => {
+        const bounds = marker.levelBadge.getBounds();
+        return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+      });
+
+    const mill = BUILDING_LAYOUT.lumber_mill;
+    const size = { width: this.woodHint.width, height: this.woodHint.height };
+    const placed = placeHint(
+      { x: mill.x, y: mill.y, halfHeight: (34 * mill.scale) / 2 },
+      size,
+      obstacles,
+      { gap: 8, bounds: { width: this.scale.width, height: this.scale.height } },
+    );
+    // The hint's origin is (0.5, 0), so x is its centre and y its top.
+    this.woodHint.setPosition(placed.rect.x + size.width / 2, placed.rect.y);
+  }
+
   private refreshBuildingBadges(): void {
     // Show the wood nudge only while the Lumber Mill is unbuilt.
     this.woodHint.setVisible(this.state.buildings.level('lumber_mill') < 1);
+    // Badges are re-texted just below, so the hint is repositioned at the END of this method against their
+    // settled bounds rather than the text they held a frame ago.
     for (const marker of this.markers) {
       const level = this.state.buildings.level(marker.kind);
       const upgrading = this.state.buildings.isUpgrading(marker.kind);
@@ -318,6 +356,8 @@ export class TownScene extends Phaser.Scene {
         marker.sprite.setAlpha(1);
       }
     }
+
+    this.repositionWoodHint();
   }
 
   // ---- Top resource bar ----------------------------------------------------
