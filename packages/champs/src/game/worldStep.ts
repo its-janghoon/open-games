@@ -185,6 +185,21 @@ export interface WorldState {
    * variable.
    */
   nextInsertionOrder: number;
+  /**
+   * Where each unit has been ordered to walk, or null.
+   *
+   * In the state rather than in the simulation's closure, and the reason is worth recording
+   * because I got it wrong first. I expected a closure-held goal map to DESYNC a replay: order
+   * A at tick 0, order B at tick 10, then force a rewind to a snapshot before 10, and the
+   * closure would still hold B while the replayed ticks should use A. Measured, it does not -
+   * the rollback core supplies a full input map on every replayed tick, predicting
+   * repeat-last-input, so the goal is re-derived from the input ring instead of persisting.
+   *
+   * It is here anyway, because Simulation.step is documented as pure with respect to its
+   * arguments and reading a closure breaks that whatever the current behaviour happens to be.
+   * A contract that holds by accident is a contract that breaks during the next change.
+   */
+  moveGoals: Record<string, Vec2 | null>;
 }
 
 /**
@@ -220,6 +235,9 @@ export function cloneWorldState(state: WorldState): WorldState {
     ),
     pendingImpacts: state.pendingImpacts.map(cloneImpact),
     nextInsertionOrder: state.nextInsertionOrder,
+    moveGoals: Object.fromEntries(
+      Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
+    ),
   };
 }
 

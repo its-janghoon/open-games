@@ -51,6 +51,7 @@ const world = (simTime = 0): WorldState => ({
   lives: { caster: createChampionLifeState(), victim: createChampionLifeState() },
   pendingImpacts: [],
   nextInsertionOrder: 0,
+  moveGoals: { caster: null, victim: null },
 });
 
 describe('impact queue in the snapshot', () => {

@@ -55,6 +55,7 @@ describe('advanceLives against a real match', () => {
       lives: { a: { phase: 'dead', diedAt: 0, respawnsAt: RESPAWN_DELAY, invulnerableUntil: null } },
       pendingImpacts: [],
       nextInsertionOrder: 0,
+      moveGoals: {},
     };
 
     const observed: { t: number; phase: string; dead: boolean }[] = [];
@@ -86,6 +87,7 @@ describe('advanceLives against a real match', () => {
       lives: { a: { phase: 'dead', diedAt: 0, respawnsAt: RESPAWN_DELAY, invulnerableUntil: null } },
       pendingImpacts: [],
       nextInsertionOrder: 0,
+      moveGoals: {},
     });
 
     const just_before = build(RESPAWN_DELAY - 0.001);

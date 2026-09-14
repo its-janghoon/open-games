@@ -182,6 +182,7 @@ describe('cloneWorldState', () => {
     },
     pendingImpacts: [impact({ insertionOrder: 3, dueAt: 14 })],
     nextInsertionOrder: 4,
+    moveGoals: { a: { x: 40, y: 50 }, b: null },
   });
 
   it('copies every value', () => {
@@ -284,6 +285,7 @@ describe('advanceLives', () => {
     lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    moveGoals: {},
   });
 
   it('leaves a champion dead before its deadline', () => {
@@ -361,6 +363,7 @@ describe('advanceEffects', () => {
     lives: { a: createChampionLifeState() },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    moveGoals: {},
   });
 
   it('moves the clock and expires what the new clock has passed', () => {
