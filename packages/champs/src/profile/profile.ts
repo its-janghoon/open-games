@@ -1,5 +1,6 @@
 import { CHAMPIONS } from '../data/champions';
 import { isDifficulty, isMatchKind } from '../game/tutorial/config';
+import { decodeGhost } from '../game/ghost';
 import type {
   ChampionMastery,
   ChampsProfile,
@@ -12,6 +13,12 @@ export const PROFILE_STORAGE_KEY = 'champs:profile';
 export const STARTING_CURRENCY = 500;
 /** Recent idempotency window; old match ids are evicted to bound persisted saves. */
 export const MAX_APPLIED_MATCH_IDS = 64;
+/**
+ * How many imported ghost codes a profile keeps. Bounded because this list is fed by
+ * pasting: without a cap a profile grows forever from a feature whose whole point is
+ * that codes are cheap to share.
+ */
+export const MAX_GHOST_CODES = 12;
 export const STARTER_CHAMPION_IDS = [
   'ashborne',
   'ironhold',
@@ -112,6 +119,7 @@ export function createDefaultProfile(): ChampsProfile {
     practiceCompleted: false,
     seenFlags: {},
     appliedMatchIds: [],
+    ghostCodes: [],
   };
 }
 
@@ -166,5 +174,16 @@ export function migrateProfile(value: unknown): ChampsProfile {
     appliedMatchIds: uniqueStrings(value.appliedMatchIds).slice(
       -MAX_APPLIED_MATCH_IDS,
     ),
+    // Ghost fields have to be listed HERE or they vanish on every reload: this
+    // function is a strict allowlist that rebuilds the profile from named keys, so an
+    // unlisted field is silently dropped rather than preserved. Codes are validated on
+    // the way in - a corrupt or foreign-version code is discarded here rather than
+    // failing later at the point of use, where it would look like a broken feature.
+    ...(typeof value.myGhostCode === 'string' && decodeGhost(value.myGhostCode).ok
+      ? { myGhostCode: value.myGhostCode }
+      : {}),
+    ghostCodes: uniqueStrings(value.ghostCodes)
+      .filter((code) => decodeGhost(code).ok)
+      .slice(-MAX_GHOST_CODES),
   };
 }

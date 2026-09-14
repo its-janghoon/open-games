@@ -31,6 +31,18 @@ export interface ChampsProfile {
   lastSetup?: LastMatchSetup;
   seenFlags: Record<string, true>;
   appliedMatchIds: string[];
+  /**
+   * The player's own learned ghost, as a shareable code, or undefined before enough
+   * has been observed to learn one. Stored as a CODE rather than a decoded policy so
+   * that what is persisted is exactly what can be shared - one representation, so a
+   * profile can never hold a ghost that will not survive being sent to a friend.
+   */
+  myGhostCode?: string;
+  /**
+   * Ghost codes the player has imported, newest first. Opponents are opt-in: a stored
+   * ghost changes nothing until a match explicitly asks for one.
+   */
+  ghostCodes: string[];
 }
 
 /** Minimal storage contract, compatible with window.localStorage and test fakes. */
