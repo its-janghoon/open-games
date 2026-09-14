@@ -184,6 +184,11 @@ describe('cloneWorldState', () => {
     nextInsertionOrder: 4,
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
     structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
+    waves: {
+      spawnedWaves: 3,
+      nextOrder: 9,
+      pending: [{ dueAt: 31, insertionOrder: 8, type: 'melee', team: 'ally', lane: 'mid' }],
+    },
     moveGoals: { a: { x: 40, y: 50 }, b: null },
   });
 
@@ -221,6 +226,12 @@ describe('cloneWorldState', () => {
     copy.structures.t1.hp = 0;
     copy.structures.t1.killedAt = 88;
     copy.structures.zz = { hp: 5, maxHp: 5, dead: false, killedAt: null };
+    // Waves for the same reason as economy: scheduleDueWaves replaces the record rather than mutating it, so a
+    // shared reference is harmless TODAY. This function promises independence regardless.
+    copy.waves.spawnedWaves = 42;
+    copy.waves.nextOrder = 42;
+    copy.waves.pending[0].dueAt = -1;
+    copy.waves.pending.push({ ...copy.waves.pending[0], insertionOrder: 777 });
 
     expect(original.tick).toBe(7);
     expect(original.units).toHaveLength(2);
@@ -234,6 +245,10 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.waves.spawnedWaves).toBe(3);
+    expect(original.waves.nextOrder).toBe(9);
+    expect(original.waves.pending[0].dueAt).toBe(31);
+    expect(original.waves.pending).toHaveLength(1);
   });
 
   it('survives a step applied to the copy, which is how a rollback actually uses it', () => {
@@ -308,6 +323,7 @@ describe('advanceLives', () => {
     lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 } },
     moveGoals: {},
@@ -388,6 +404,7 @@ describe('advanceEffects', () => {
     lives: { a: createChampionLifeState() },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},
     economy: {},
     moveGoals: {},

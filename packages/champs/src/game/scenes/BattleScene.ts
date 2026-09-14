@@ -161,8 +161,6 @@ import {
   spawnMinion,
   advanceMinion,
   minionStats,
-  nextWaveNumberAt,
-  laneWaveComposition,
   type Minion as RiftMinion,
   type MinionType,
 } from '../rift/minions';
@@ -207,6 +205,7 @@ import {
 } from '../rift/objectives';
 import type { EpicMonster } from '../rift/economy';
 import { attemptPurchase } from '../inventory';
+import { scheduleDueWaves } from '../rift/waveSchedule';
 import {
   createLearningState,
   currentLearningStep,
@@ -2162,33 +2161,29 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private maybeSpawnWaves() {
-    const wanted = nextWaveNumberAt(this.elapsed, this.mode);
-    while (this.spawnedWaves < wanted) {
-      this.spawnedWaves += 1;
-      this.spawnWave(this.spawnedWaves);
-    }
-  }
-
-  private spawnWave(waveNumber: number) {
-    for (const team of ['ally', 'enemy'] as MapSide[]) {
-      for (const lane of this.lanes) {
-        // Super minions spawn when the enemy inhibitor for that lane is down.
-        const enemySide: MapSide = team === 'ally' ? 'enemy' : 'ally';
-        const inhibId = `${enemySide}-${lane}-inhibitor`;
-        const killedAt = this.inhibitorKillTimes.get(inhibId) ?? null;
-        const inhibitorsDown = isInhibitorAlive(this.elapsed, killedAt, this.mode) ? 0 : 1;
-        const comp = laneWaveComposition(waveNumber, inhibitorsDown);
-        comp.forEach((type, i) => {
-          this.pendingWaveSpawns.push({
-            dueAt: this.elapsed + (i * this.rules.waves.unitStaggerMilliseconds) / 1000,
-            insertionOrder: this.authorityInsertionOrder++,
-            type,
-            team,
-            lane,
-          });
-        });
-      }
-    }
+    /**
+     * Delegates to the extracted scheduler rather than keeping a second copy of the catch-up loop.
+     *
+     * The scene keeps its own storage — it is still the authority for a real match — but the arithmetic that decides
+     * which waves are due, what each lane's composition is, and what insertion order each member gets now lives in
+     * one place that a rollback can replay. The inhibitor kill times are handed over as plain data instead of the
+     * scene's Map, because a Map is exactly what a snapshot cannot carry.
+     */
+    const advanced = scheduleDueWaves(
+      {
+        spawnedWaves: this.spawnedWaves,
+        pending: this.pendingWaveSpawns,
+        nextOrder: this.authorityInsertionOrder,
+      },
+      this.elapsed,
+      this.lanes,
+      { killedAt: Object.fromEntries(this.inhibitorKillTimes) },
+      (now, killedAt) => isInhibitorAlive(now, killedAt, this.mode),
+      this.mode,
+    );
+    this.spawnedWaves = advanced.spawnedWaves;
+    this.pendingWaveSpawns = advanced.pending;
+    this.authorityInsertionOrder = advanced.nextOrder;
   }
 
   private processWaveSpawns() {

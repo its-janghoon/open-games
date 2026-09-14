@@ -4,7 +4,9 @@ import { effectiveDamage, type Unit } from './combat';
 import { createChampionLifeState } from './championLifeState';
 import { createEffectState } from './effects';
 import { initialGold } from './rift/economy';
-import { initialStructure, reviveStructures } from './rift/structures';
+import { initialStructure, isInhibitorAlive, reviveStructures } from './rift/structures';
+import { initialWaveSchedule, scheduleDueWaves } from './rift/waveSchedule';
+import { LANES } from './rift/map';
 import {
   advanceEconomy,
   advanceEffects,
@@ -93,6 +95,7 @@ export function createChampsSimulation(
         // Both participants start with the same gold so a divergence cannot hide behind an initial asymmetry.
         // One inhibitor per side, at full health. Enough to exercise the revive deadline under rollback without
       // needing structure combat in this harness, which BattleScene still owns.
+      waves: initialWaveSchedule(),
       structures: {
         allyInhibitor: initialStructure(2000),
         enemyInhibitor: initialStructure(2000),
@@ -155,6 +158,16 @@ export function createChampsSimulation(
       // Revive runs against the clock AFTER it has advanced, so a structure whose respawn time falls on this tick is
       // back before anything reads it. The deadline is absolute, so a replayed tick reaches the same verdict.
       next.structures = reviveStructures(next.structures, next.simTime);
+      // Scheduling runs after the revive, because a lane's wave composition depends on whether the enemy inhibitor
+      // is standing THIS tick — schedule first and a wave could be upgraded to super minions by a structure that
+      // came back on the very same tick.
+      next.waves = scheduleDueWaves(
+        next.waves,
+        next.simTime,
+        LANES,
+        { killedAt: Object.fromEntries(Object.entries(next.structures).map(([id, s]) => [id, s.killedAt])) },
+        (now, killedAt) => isInhibitorAlive(now, killedAt),
+      );
 
       // Resolve what has landed. Damage is computed from the SOURCE as it was at cast time,
       // which is why the queue copies the shooter rather than referencing it - a shooter that

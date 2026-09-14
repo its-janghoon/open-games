@@ -7,6 +7,7 @@ import {
 import { expireEffects, type EffectState } from './effects';
 import { advanceGold, type GoldState } from './rift/economy';
 import type { StructureState } from './rift/structures';
+import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import {
   advanceAttackCooldown,
   distance,
@@ -157,7 +158,8 @@ export function advanceEconomy(
  * what made this slice possible at all.
  *
  * Still incomplete, but less so than this comment used to claim: effects, champion life, the impact queue, move
- * goals, gold and now STRUCTURES are all in it. What remains scene-only is minion waves. Declaring a full world
+ * goals, gold, structures and the minion wave SCHEDULE are all in it. What remains scene-only is minion bodies —
+ * their movement, combat and death. Declaring a full world
  * state now would be a promise the step cannot keep, and a rollback over a state that
  * misses a field does not fail: it silently desyncs on that field.
  */
@@ -243,6 +245,16 @@ export interface WorldState {
    * structures lets the two peers disagree about whether the game is already over.
    */
   structures: Record<string, StructureState>;
+  /**
+   * The minion wave schedule.
+   *
+   * Decides WHICH minions exist and WHEN, so two peers that disagree about it disagree about the population of the
+   * map. A rollback restoring champions while dropping queued spawns would delete minions already scheduled.
+   *
+   * Scheduling only: minion BODIES — movement, combat, death — are still advanced inside BattleScene, so a whole
+   * match is not yet rollback-proven. Named here rather than left for a reader to discover.
+   */
+  waves: WaveSchedule;
 }
 
 /**
@@ -284,6 +296,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     structures: Object.fromEntries(
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
+    waves: cloneWaveSchedule(state.waves),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

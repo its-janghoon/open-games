@@ -16,6 +16,7 @@ import {
 } from './worldStep';
 import { createEffectState } from './effects';
 import { createChampionLifeState } from './championLifeState';
+import { nextWaveNumberAt } from './rift/minions';
 
 const PARTICIPANTS = ['p1', 'p2'] as const;
 
@@ -259,6 +260,7 @@ describe('champs world under rollback', () => {
         lives: { p1: createChampionLifeState() },
         pendingImpacts: [],
         nextInsertionOrder: 0,
+        waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
         structures: {},
         economy: {},
         moveGoals: { p1: null },
@@ -450,6 +452,66 @@ describe('champs world under rollback', () => {
     }
     expect(state.structures.allyInhibitor.dead).toBe(true);
     expect(state.structures.allyInhibitor.hp).toBe(0);
+  });
+
+  it('schedules the same waves whether or not the run was rewound', () => {
+    /**
+     * The wave schedule decides WHICH minions exist and WHEN, so two peers who disagree about it disagree about the
+     * population of the map. A rollback that restored champions while dropping queued spawns would delete minions
+     * that were already scheduled.
+     *
+     * The clock is seeded just before the first wave so the spawn lands inside the replayed window — the same trick
+     * the inhibitor test uses, and for the same reason: waiting out the real interval would be thousands of ticks.
+     */
+    const TICKS = 120;
+    const LATE = 25;
+    const p1: ChampsInput = { moveTo: { x: 80, y: 140 }, cast: false };
+    const p2Usual: ChampsInput = { moveTo: { x: 460, y: 440 }, cast: false };
+    const p2Late: ChampsInput = { moveTo: { x: 130, y: 25 }, cast: false };
+    const p2At = (tick: number) => (tick === LATE ? p2Late : p2Usual);
+
+    const base = createChampsSimulation(PARTICIPANTS).initial();
+    // Find the first wave time from the rules, then start half a second short of it.
+    let firstWave = 0;
+    for (let t = 0; t < 600; t += 0.5) {
+      if (nextWaveNumberAt(t) >= 1) {
+        firstWave = t;
+        break;
+      }
+    }
+    expect(firstWave, 'a wave must become due at some point').toBeGreaterThan(0);
+    const seed = (state: WorldState): WorldState => ({ ...state, simTime: firstWave - 0.5 });
+
+    const reference = createChampsSimulation(PARTICIPANTS);
+    let expected = seed(base);
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      expected = reference.step(
+        expected,
+        new Map([
+          ['p1', p1],
+          ['p2', p2At(tick)],
+        ]),
+        tick,
+      );
+    }
+
+    const sim = createChampsSimulation(PARTICIPANTS);
+    const original = sim.initial;
+    sim.initial = () => seed(original());
+    const session = new RollbackSession(sim, { participants: PARTICIPANTS, maxRollbackTicks: 300 });
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      session.setLocalInput('p1', p1);
+      if (tick !== LATE) session.applyRemoteInput('p2', tick, p2At(tick));
+      session.advanceTo(tick + 1);
+    }
+    const late = session.applyRemoteInput('p2', LATE, p2Late);
+    expect(late.accepted, late.rejection ?? 'should accept').toBe(true);
+    expect(late.resimulated, 'a mispredicted input must force a real replay').toBeGreaterThan(0);
+
+    expect(session.peek().waves).toEqual(expected.waves);
+    // The window must actually cross a spawn, or a dropped schedule would be invisible.
+    expect(expected.waves.spawnedWaves, 'the window must cross the first wave').toBeGreaterThan(0);
+    expect(expected.waves.pending.length).toBeGreaterThan(0);
   });
 
   it('refuses an input older than the rollback window instead of applying it to the wrong base', () => {
