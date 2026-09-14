@@ -142,9 +142,9 @@
   "openWork": [
     {
       "item": "Subsetting the Korean webfonts to the glyphs actually used.",
-      "size": "champs 1.09 MB across two NotoSansKR weights, lastwar 545 KB, kingshot Galmuri11 493 KB. whiteout does the same job with two NanumGothicCoding weights totalling 76 KB, so roughly 40 KB per weight is achievable and the others carry about 13x what they need.",
-      "why": "No subsetter is available on this host and installing one is not the agent's to do. Checked and absent: pyftsubset, hb-subset, fonttools and glyphhanger on PATH; fontTools in system python and in the crew venv; any subsetting or font-parsing package in node_modules or in any package.json.",
-      "needs": "Approval to install a font toolchain - python3 fonttools with brotli (giving pyftsubset), or the harfbuzz hb-subset binary."
+      "size": "Measured per glyph, which cancels out how much Korean a game happens to show: champs 484 distinct Korean characters in 1068.7 KB (2261 B/glyph), lastwar 393 in 544.7 KB (1419), kingshot 331 in 492.9 KB (1525), against whiteout 421 in 74.6 KB (182). So champs carries 12.5x, kingshot 8.4x and lastwar 7.8x what whiteout pays for the same job.",
+      "why": "No subsetter is available on this host and installing one is not the agent's to do. Checked and absent: pyftsubset, hb-subset, fonttools, woff2_compress and sfnt2woff on PATH; fontTools in system python; any font-parsing package in node_modules. python brotli IS present, but that is woff2 compression only and cannot rebuild a glyph table.",
+      "needs": "Approval to install a font toolchain - python3 fonttools with brotli (giving pyftsubset), or the harfbuzz hb-subset binary. `node scripts/font-glyphs.mjs` then prints the exact command per font."
     }
   ],
   "funding": {

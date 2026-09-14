@@ -18,6 +18,7 @@
     "build:site": "node site/build.mjs",
     "docs:check": "node scripts/gen-readme.mjs --check",
     "docs:readme": "node scripts/gen-readme.mjs",
+    "fonts:glyphs": "node scripts/font-glyphs.mjs",
     "new-game": "node scripts/new-game.mjs",
     "test": "npm run test --workspaces --if-present && npm run check:panels && npm run check:text",
     "thumbs": "node scripts/capture-thumbnails.mjs",
