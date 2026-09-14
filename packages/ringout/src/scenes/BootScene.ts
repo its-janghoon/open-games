@@ -21,11 +21,22 @@ export class BootScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 44, 'Scaffolded from packages/_template', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '16px',
-        color: '#9aa7d4',
-      })
+      .text(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT / 2 + 44,
+        '아무 키나 눌러 시작  ·  press any key\nP1  WASD + F G H        P2  \u2190\u2191\u2192\u2193 + J K L',
+        {
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: '16px',
+          color: '#9aa7d4',
+          align: 'center',
+          lineSpacing: 8,
+        },
+      )
       .setOrigin(0.5);
+
+    // Any key starts the fight. A title that needs a specific key is a title some players stare at.
+    this.input.keyboard?.once('keydown', () => this.scene.start('Fight'));
+    this.input.once('pointerdown', () => this.scene.start('Fight'));
   }
 }
