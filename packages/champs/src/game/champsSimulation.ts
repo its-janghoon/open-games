@@ -4,6 +4,7 @@ import { effectiveDamage, type Unit } from './combat';
 import { createChampionLifeState } from './championLifeState';
 import { createEffectState } from './effects';
 import { initialGold } from './rift/economy';
+import { initialStructure, reviveStructures } from './rift/structures';
 import {
   advanceEconomy,
   advanceEffects,
@@ -89,6 +90,12 @@ export function createChampsSimulation(
         pendingImpacts: [],
         nextInsertionOrder: 0,
         // Both participants start with the same gold so a divergence cannot hide behind an initial asymmetry.
+        // One inhibitor per side, at full health. Enough to exercise the revive deadline under rollback without
+      // needing structure combat in this harness, which BattleScene still owns.
+      structures: {
+        allyInhibitor: initialStructure(2000),
+        enemyInhibitor: initialStructure(2000),
+      },
         economy: Object.fromEntries(participants.map((id) => [id, initialGold(500)])),
         moveGoals: Object.fromEntries(participants.map((id) => [id, null])),
       };
@@ -144,6 +151,9 @@ export function createChampsSimulation(
       // rollback has to restore, so a step that only touched gold on the tick it crossed a whole number would leave
       // the carry outside the snapshot's reach again.
       next.economy = advanceEconomy(next.economy, TICK_SECONDS);
+      // Revive runs against the clock AFTER it has advanced, so a structure whose respawn time falls on this tick is
+      // back before anything reads it. The deadline is absolute, so a replayed tick reaches the same verdict.
+      next.structures = reviveStructures(next.structures, next.simTime);
 
       // Resolve what has landed. Damage is computed from the SOURCE as it was at cast time,
       // which is why the queue copies the shooter rather than referencing it - a shooter that

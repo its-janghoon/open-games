@@ -259,6 +259,7 @@ describe('champs world under rollback', () => {
         lives: { p1: createChampionLifeState() },
         pendingImpacts: [],
         nextInsertionOrder: 0,
+        structures: {},
         economy: {},
         moveGoals: { p1: null },
       };
@@ -358,6 +359,97 @@ describe('champs world under rollback', () => {
       expected.economy.p1.accrual,
       'and it must end mid-fraction, which is the state a rollback can lose',
     ).toBeGreaterThan(0);
+  });
+
+  it('revives a downed structure at the same tick whether or not the run was rewound', () => {
+    /**
+     * Structure health is what the match outcome is computed from, so a rollback that restores champions but not
+     * structures lets two peers disagree about whether the game is already over.
+     *
+     * The deadline is absolute — the tick a structure went down, not a countdown — which is what makes it rewindable
+     * at all: a countdown would need to know how many ticks were undone, information the state does not carry. This
+     * drives a rollback across the respawn moment and asserts the structure's state matches a run that never rewound.
+     */
+    const TICKS = 120;
+    const LATE = 30;
+    const p1: ChampsInput = { moveTo: { x: 70, y: 130 }, cast: false };
+    const p2Usual: ChampsInput = { moveTo: { x: 470, y: 450 }, cast: false };
+    const p2Late: ChampsInput = { moveTo: { x: 110, y: 20 }, cast: false };
+    const p2At = (tick: number) => (tick === LATE ? p2Late : p2Usual);
+
+    /**
+     * The clock is seeded mid-match rather than the window being made long enough.
+     *
+     * A conquest inhibitor respawns 150 seconds after it falls, which is 9000 ticks — far too many to drive in a
+     * test. So this starts at 149.5 s of sim time with an inhibitor destroyed at t=0: the deadline then lands half a
+     * second in, 30 ticks from the start, well inside the replayed window. Nothing artificial about the state — a
+     * match really is 149.5 seconds long at that point — and it avoids the alternative of a negative kill stamp,
+     * which would mean a structure destroyed before the match began. The 150-second duration itself is already
+     * covered by the existing structures tests; what is under test here is the deadline surviving a rewind.
+     */
+    const downAt = 0;
+    const seed = (state: WorldState): WorldState => ({
+      ...state,
+      simTime: 149.5,
+      structures: {
+        ...state.structures,
+        allyInhibitor: { hp: 0, maxHp: 2000, dead: true, killedAt: downAt },
+      },
+    });
+
+    const reference = createChampsSimulation(PARTICIPANTS);
+    let expected = seed(reference.initial());
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      expected = reference.step(
+        expected,
+        new Map([
+          ['p1', p1],
+          ['p2', p2At(tick)],
+        ]),
+        tick,
+      );
+    }
+
+    const sim = createChampsSimulation(PARTICIPANTS);
+    const base = sim.initial;
+    sim.initial = () => seed(base());
+    const session = new RollbackSession(sim, {
+      participants: PARTICIPANTS,
+      maxRollbackTicks: 300,
+    });
+    for (let tick = 0; tick < TICKS; tick += 1) {
+      session.setLocalInput('p1', p1);
+      if (tick !== LATE) session.applyRemoteInput('p2', tick, p2At(tick));
+      session.advanceTo(tick + 1);
+    }
+    const late = session.applyRemoteInput('p2', LATE, p2Late);
+    expect(late.accepted, late.rejection ?? 'should accept').toBe(true);
+    expect(late.resimulated, 'a mispredicted input must force a real replay').toBeGreaterThan(0);
+
+    expect(session.peek().structures).toEqual(expected.structures);
+    // The scenario has to actually cross the respawn deadline, or a broken revive would be invisible.
+    expect(
+      expected.structures.allyInhibitor.dead,
+      'the window must be long enough for the inhibitor to come back',
+    ).toBe(false);
+    expect(expected.structures.allyInhibitor.killedAt).toBeNull();
+    expect(expected.structures.allyInhibitor.hp).toBe(2000);
+  });
+
+  it('leaves a structure down while its respawn time has not arrived', () => {
+    // The other half of the deadline: a revive step that simply revived everything would pass the test above.
+    const sim = createChampsSimulation(PARTICIPANTS);
+    let state: WorldState = {
+      ...sim.initial(),
+      structures: {
+        allyInhibitor: { hp: 0, maxHp: 2000, dead: true, killedAt: 1_000_000 },
+      },
+    };
+    for (let tick = 0; tick < 30; tick += 1) {
+      state = sim.step(state, new Map([['p1', { moveTo: null }]]), tick);
+    }
+    expect(state.structures.allyInhibitor.dead).toBe(true);
+    expect(state.structures.allyInhibitor.hp).toBe(0);
   });
 
   it('refuses an input older than the rollback window instead of applying it to the wrong base', () => {

@@ -173,3 +173,52 @@ export function isInhibitorAlive(
   if (killedAtSeconds == null) return true;
   return nowSeconds >= inhibitorRespawnAt(killedAtSeconds, mode);
 }
+
+/**
+ * A structure's rollback state.
+ *
+ * Separate from the scene's Entity because that holds Phaser containers and cannot be rewound. What a rollback needs
+ * is only this: how much health is left, and — for an inhibitor — the absolute time it went down.
+ */
+export interface StructureState {
+  hp: number;
+  maxHp: number;
+  dead: boolean;
+  /**
+   * When this structure was destroyed, in sim seconds, or null while it stands.
+   *
+   * ABSOLUTE, never a countdown, and this is load-bearing rather than stylistic: a countdown cannot be rewound
+   * without also knowing how many ticks were undone, so a rollback would have to reconstruct information the state
+   * does not carry. An absolute stamp is simply true or not true at whatever time the replay lands on.
+   */
+  killedAt: number | null;
+}
+
+/** A structure at full health. */
+export function initialStructure(maxHp: number): StructureState {
+  return { hp: maxHp, maxHp, dead: false, killedAt: null };
+}
+
+/**
+ * Bring back every inhibitor whose respawn time has arrived.
+ *
+ * Pure, returning a new record. The predicate is the existing isInhibitorAlive, so this is not a second
+ * implementation of the timing rule — it is the record-level step that rule never had, which is why the scene kept
+ * its own Map of kill times instead. A Map is precisely the shape a snapshot cannot carry: the clone contract in
+ * worldStep documents that a JSON round-trip turns one into {}, so kill times held that way could never be rewound.
+ */
+export function reviveStructures(
+  structures: Record<string, StructureState>,
+  nowSeconds: number,
+  mode: GameMode = 'conquest',
+): Record<string, StructureState> {
+  const next: Record<string, StructureState> = {};
+  for (const [id, structure] of Object.entries(structures)) {
+    if (structure.killedAt !== null && isInhibitorAlive(nowSeconds, structure.killedAt, mode)) {
+      next[id] = { hp: structure.maxHp, maxHp: structure.maxHp, dead: false, killedAt: null };
+    } else {
+      next[id] = { ...structure };
+    }
+  }
+  return next;
+}

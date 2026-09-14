@@ -6,6 +6,7 @@ import {
 } from './championLifeState';
 import { expireEffects, type EffectState } from './effects';
 import { advanceGold, type GoldState } from './rift/economy';
+import type { StructureState } from './rift/structures';
 import {
   advanceAttackCooldown,
   distance,
@@ -156,7 +157,7 @@ export function advanceEconomy(
  * what made this slice possible at all.
  *
  * Still incomplete, but less so than this comment used to claim: effects, champion life, the impact queue, move
- * goals and now GOLD are all in it. What remains scene-only is structures and minion waves. Declaring a full world
+ * goals, gold and now STRUCTURES are all in it. What remains scene-only is minion waves. Declaring a full world
  * state now would be a promise the step cannot keep, and a rollback over a state that
  * misses a field does not fail: it silently desyncs on that field.
  */
@@ -231,6 +232,17 @@ export interface WorldState {
    * each rollback drifts a participant by up to 1.
    */
   economy: Record<string, GoldState>;
+  /**
+   * Structures, by id.
+   *
+   * A record rather than the Map the scene keeps, because a Map cannot be snapshotted — the clone contract below
+   * documents that a JSON round-trip flattens one to {}. The scene's inhibitor kill times lived in exactly that
+   * shape, which is the concrete reason structure state could never be rewound.
+   *
+   * Their health is what the match outcome is computed from, so a rollback that restores champions but not
+   * structures lets the two peers disagree about whether the game is already over.
+   */
+  structures: Record<string, StructureState>;
 }
 
 /**
@@ -268,6 +280,9 @@ export function cloneWorldState(state: WorldState): WorldState {
     nextInsertionOrder: state.nextInsertionOrder,
     economy: Object.fromEntries(
       Object.entries(state.economy).map(([id, gold]) => [id, { ...gold }]),
+    ),
+    structures: Object.fromEntries(
+      Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),

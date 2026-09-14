@@ -183,6 +183,7 @@ describe('cloneWorldState', () => {
     pendingImpacts: [impact({ insertionOrder: 3, dueAt: 14 })],
     nextInsertionOrder: 4,
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
+    structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
     moveGoals: { a: { x: 40, y: 50 }, b: null },
   });
 
@@ -217,6 +218,9 @@ describe('cloneWorldState', () => {
     copy.economy.a.gold = 99999;
     copy.economy.a.accrual = 0.99;
     copy.economy.z = { gold: 1, accrual: 0, totalEarned: 1 };
+    copy.structures.t1.hp = 0;
+    copy.structures.t1.killedAt = 88;
+    copy.structures.zz = { hp: 5, maxHp: 5, dead: false, killedAt: null };
 
     expect(original.tick).toBe(7);
     expect(original.units).toHaveLength(2);
@@ -227,6 +231,9 @@ describe('cloneWorldState', () => {
     expect(original.economy.a.gold).toBe(500);
     expect(original.economy.a.accrual).toBe(0);
     expect(original.economy.z).toBeUndefined();
+    expect(original.structures.t1.hp).toBe(1200);
+    expect(original.structures.t1.killedAt).toBeNull();
+    expect(original.structures.zz).toBeUndefined();
   });
 
   it('survives a step applied to the copy, which is how a rollback actually uses it', () => {
@@ -301,6 +308,7 @@ describe('advanceLives', () => {
     lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    structures: {},
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 } },
     moveGoals: {},
   });
@@ -380,6 +388,7 @@ describe('advanceEffects', () => {
     lives: { a: createChampionLifeState() },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    structures: {},
     economy: {},
     moveGoals: {},
   });
