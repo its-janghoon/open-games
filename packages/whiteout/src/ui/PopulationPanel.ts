@@ -92,14 +92,19 @@ export class PopulationPanel {
     this.root.add(Menu.title(this.scene, cx, cy - panelH / 2 + 34, tr('population.title'), 30));
 
     const left = cx - panelW / 2 + 40;
+    // The Recruit/Recall buttons occupy the panel's right side, so these lines
+    // may only use the width to their left. Both are created empty and filled by
+    // setText from translated strings, so their length is unknown here - the same
+    // shape that let the objective strip's instruction run out past its frame.
+    const summaryW = panelW - 335;
 
     // Summary: total / idle / working + satisfaction.
     this.summaryText = this.scene.add
-      .text(left, cy - panelH / 2 + 68, '', textStyle(15, { color: PALETTE.FROST_CSS }))
+      .text(left, cy - panelH / 2 + 68, '', textStyle(15, { color: PALETTE.FROST_CSS, wordWrap: { width: summaryW } }))
       .setOrigin(0, 0);
     this.root.add(this.summaryText);
     this.staffText = this.scene.add
-      .text(left, cy - panelH / 2 + 90, '', textStyle(13, { color: PALETTE.SUCCESS_CSS }))
+      .text(left, cy - panelH / 2 + 90, '', textStyle(13, { color: PALETTE.SUCCESS_CSS, wordWrap: { width: summaryW } }))
       .setOrigin(0, 0);
     this.root.add(this.staffText);
 

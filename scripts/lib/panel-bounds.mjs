@@ -56,7 +56,7 @@ export function evalExpr(src, scope) {
 }
 
 /** Split a call's argument list on top-level commas. */
-function splitArgs(text) {
+export function splitArgs(text) {
   const args = [];
   let depth = 0;
   let current = '';
@@ -78,7 +78,7 @@ function splitArgs(text) {
 }
 
 /** Find `name(` call sites and return their balanced argument text + offset. */
-function findCalls(source, name) {
+export function findCalls(source, name) {
   const out = [];
   const needle = `${name}(`;
   let index = source.indexOf(needle);
@@ -99,7 +99,7 @@ function findCalls(source, name) {
 }
 
 /** Brace-matched function bodies, keyed by their declared name. */
-function functionBodies(source) {
+export function functionBodies(source) {
   const bodies = [];
   const re = /(?:^|\n)\s*(?:private |public |protected )?(?:async )?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::\s*[\w<>[\]|\s.]+)?\s*\{/g;
   let m = re.exec(source);
@@ -140,7 +140,7 @@ function optNumber(optsText, key, scope) {
   return m ? evalExpr(m[1], scope) : null;
 }
 
-function lineOf(source, index) {
+export function lineOf(source, index) {
   return source.slice(0, index).split('\n').length;
 }
 

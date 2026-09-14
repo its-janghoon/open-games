@@ -1,0 +1,3 @@
+{
+  "_comment": "Known text-wrap violations, by package:function. EMPTY on purpose: the one instance this check was written for (whiteout's objective strip) is fixed, so any entry appearing here is a regression. Do not add an entry to make the gate pass - give the Text a wordWrap width, or a fixedWidth, instead."
+}
