@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   advanceEffects,
+  advanceLives,
   advanceTimers,
   cloneWorldState,
   moveUnitToward,
@@ -10,6 +11,7 @@ import {
   type WorldState,
 } from './worldStep';
 import type { Unit } from './combat';
+import { createChampionLifeState } from './championLifeState';
 import { createEffectState } from './effects';
 
 /**
@@ -159,6 +161,10 @@ describe('cloneWorldState', () => {
       },
       b: createEffectState(),
     },
+    lives: {
+      a: { phase: 'alive', diedAt: null, respawnsAt: null, invulnerableUntil: null },
+      b: { phase: 'dead', diedAt: 11, respawnsAt: 25, invulnerableUntil: null },
+    },
   });
 
   it('copies every value', () => {
@@ -237,6 +243,91 @@ describe('cloneWorldState', () => {
     copy.simTime = 999;
     expect(original.simTime).toBe(12.5);
   });
+
+  it('gives each life state its own identity', () => {
+    // advanceChampionLife never mutates and returns the same object when nothing changed,
+    // so sharing the reference would be safe TODAY. The copy is here so this function's
+    // promise does not depend on an immutability convention kept in another file.
+    const original = state();
+    const copy = cloneWorldState(original);
+    copy.lives.b.phase = 'alive';
+    copy.lives.b.respawnsAt = null;
+    expect(original.lives.b.phase).toBe('dead');
+    expect(original.lives.b.respawnsAt).toBe(25);
+  });
+});
+
+describe('advanceLives', () => {
+  const deadAt = (respawnsAt: number, simTime: number): WorldState => ({
+    tick: 0,
+    simTime,
+    units: [unit({ id: 'a', dead: true })],
+    cooldowns: { a: { Q: 0, W: 0, E: 0, R: 0 } },
+    effects: { a: createEffectState() },
+    lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
+  });
+
+  it('leaves a champion dead before its deadline', () => {
+    const state = deadAt(30, 10);
+    advanceLives(state);
+    expect(state.lives.a.phase).toBe('respawning');
+    expect(state.units[0].dead, 'still not on the map').toBe(true);
+  });
+
+  it('brings a champion back once the clock passes the deadline', () => {
+    const state = deadAt(30, 31);
+    advanceLives(state);
+    expect(state.lives.a.phase).toBe('invulnerable');
+    expect(state.units[0].dead, 'present again, so damageable rules apply').toBe(false);
+  });
+
+  it('keeps unit.dead consistent with the phase, since it is derived from it', () => {
+    // A snapshot describing a live phase beside a dead flag describes a champion that is
+    // both, and whichever field the next system reads decides what the peers believe.
+    const state = deadAt(30, 31);
+    state.units[0].dead = true;
+    advanceLives(state);
+    expect(state.units[0].dead).toBe(false);
+  });
+
+  it('does not move the clock — advanceEffects owns that', () => {
+    // Two subsystems each adding dt would make the result depend on how many were called,
+    // which is a desync decided by call order rather than by inputs.
+    const state = deadAt(30, 10);
+    advanceLives(state);
+    expect(state.simTime).toBe(10);
+  });
+
+  it('rewinds a respawn correctly, which is the whole reason lives are in the snapshot', () => {
+    // Advance past the respawn, restore the earlier snapshot, and the champion must be
+    // dead again - because at that tick it was. Leave lives out of the snapshot and the
+    // rollback resurrects it: a live champion standing where a corpse was.
+    const state = deadAt(30, 29.9);
+    const snapshot = cloneWorldState(state);
+
+    advanceEffects(state, 0.2);
+    advanceLives(state);
+    expect(state.units[0].dead).toBe(false);
+
+    const restored = cloneWorldState(snapshot);
+    advanceLives(restored);
+    expect(restored.lives.a.phase, 'dead again at the restored tick').toBe('respawning');
+    expect(restored.units[0].dead).toBe(true);
+
+    // Replaying the same step from the restored state reaches the same place.
+    advanceEffects(restored, 0.2);
+    advanceLives(restored);
+    expect(restored.lives.a.phase).toBe(state.lives.a.phase);
+    expect(restored.units[0].dead).toBe(false);
+  });
+
+  it('ignores a life entry with no matching unit rather than throwing', () => {
+    // A snapshot can outlive a unit - it is taken before a despawn the replay undoes.
+    const state = deadAt(30, 31);
+    state.lives.ghost = { phase: 'dead', diedAt: 0, respawnsAt: 30, invulnerableUntil: null };
+    expect(() => advanceLives(state)).not.toThrow();
+    expect(state.lives.ghost.phase).toBe('invulnerable');
+  });
 });
 
 describe('advanceEffects', () => {
@@ -248,6 +339,7 @@ describe('advanceEffects', () => {
     effects: {
       a: { ...createEffectState(), slows: [{ source: 'q', percent: 0.5, expiresAt }] },
     },
+    lives: { a: createChampionLifeState() },
   });
 
   it('moves the clock and expires what the new clock has passed', () => {

@@ -1,3 +1,9 @@
+import type { GameMode } from './battleStore';
+import {
+  advanceChampionLife,
+  isChampionPresent,
+  type ChampionLifeState,
+} from './championLifeState';
 import { expireEffects, type EffectState } from './effects';
 import {
   advanceAttackCooldown,
@@ -150,6 +156,14 @@ export interface WorldState {
   cooldowns: Record<string, CooldownState>;
   /** Active effects per unit id. */
   effects: Record<string, EffectState>;
+  /**
+   * Champion death / respawn state per unit id.
+   *
+   * In the snapshot because a rollback that restores a position but not whether the unit
+   * was DEAD resurrects it: the replayed tick finds a live champion standing where a
+   * corpse was, and from there the two peers disagree about who is on the map.
+   */
+  lives: Record<string, ChampionLifeState>;
 }
 
 /**
@@ -172,6 +186,16 @@ export function cloneWorldState(state: WorldState): WorldState {
     ),
     effects: Object.fromEntries(
       Object.entries(state.effects).map(([id, fx]) => [id, cloneEffectState(fx)]),
+    ),
+    /**
+     * Copied, even though advanceChampionLife never mutates and returns the same object
+     * when nothing changed - so sharing the reference would be safe today. It is copied
+     * anyway because this function's promise is a fully independent copy, and honouring
+     * that promise must not depend on an immutability convention maintained in another
+     * file. Four scalar fields is not a cost worth trading a silent hazard for.
+     */
+    lives: Object.fromEntries(
+      Object.entries(state.lives).map(([id, life]) => [id, { ...life }]),
     ),
   };
 }
@@ -214,5 +238,32 @@ export function advanceEffects(state: WorldState, dt: number): void {
   state.simTime += dt;
   for (const fx of Object.values(state.effects)) {
     expireEffects(fx, state.simTime);
+  }
+}
+
+/**
+ * Advance every champion's life phase against the current clock.
+ *
+ * Nothing here is extracted arithmetic, and that is the finding rather than an omission:
+ * championLifeState.ts already holds the only implementation, advanceChampionLife is
+ * already pure, and its deadlines are already ABSOLUTE match times rather than
+ * countdowns - which is the shape rollback needs, because a countdown decremented per
+ * frame cannot be rewound without also knowing how many frames were undone. So this is a
+ * per-side entry point, like advanceTimers, not a second copy.
+ *
+ * It does not move the clock. advanceEffects owns that, so a tick advances time once
+ * however many subsystems read it - two subsystems each adding dt is a desync where the
+ * order of calls decides the result.
+ *
+ * `unit.dead` is kept in step here because it is DERIVED from the life phase, and a
+ * snapshot that restored a live phase beside a dead flag would describe a champion that
+ * is both.
+ */
+export function advanceLives(state: WorldState, mode: GameMode = 'conquest'): void {
+  for (const [id, life] of Object.entries(state.lives)) {
+    const next = advanceChampionLife(life, state.simTime, mode);
+    state.lives[id] = next;
+    const unit = state.units.find((candidate) => candidate.id === id);
+    if (unit) unit.dead = !isChampionPresent(next);
   }
 }
