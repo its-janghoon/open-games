@@ -152,14 +152,31 @@ export function castView(
 }
 
 /**
- * Wall height on screen for a perpendicular distance, in pixels.
+ * Distance from the eye to the projection plane, in PIXELS, for a given viewport width and field of view.
+ *
+ * This is the constant that converts a world distance into a screen height, and getting it wrong is what made
+ * the first frame look wrong: `wallHeight` used the viewport HEIGHT (540) as the numerator, which is the
+ * formula you get by assuming the vertical field of view happens to subtend exactly one world unit at one
+ * unit of distance. It does not. The vertical field follows from the horizontal one and the aspect ratio, and
+ * with a 60-degree horizontal view at 960x540 the correct numerator is (960/2)/tan(30°) ≈ 831 — so every wall
+ * was drawn at 65% of its true height, floating in a band around the horizon instead of meeting the floor.
+ *
+ * Derived rather than pasted as 831, so changing the field of view moves the walls with it instead of silently
+ * desynchronising the picture from the geometry.
+ */
+export function projectionDistance(viewportWidth: number, fov: number = DEFAULT_FOV): number {
+  return viewportWidth / 2 / Math.tan(fov / 2);
+}
+
+/**
+ * On-screen height of a one-unit-tall wall at a perpendicular distance.
  *
  * Clamped at a minimum distance so a player pressed against a wall does not divide by zero and produce an
  * Infinity-tall column, which draws as a full-screen block of colour and looks like the renderer crashed.
  */
-export function wallHeight(distance: number, viewportHeight: number): number {
+export function wallHeight(distance: number, projection: number): number {
   const safe = Math.max(0.0001, distance);
-  return viewportHeight / safe;
+  return projection / safe;
 }
 
 /**
@@ -173,4 +190,23 @@ export function shade(distance: number, side: 'x' | 'y'): number {
   const fog = Math.max(0.18, Math.min(1, 1 - distance / (GRID_SIZE * 0.9)));
   const faceFactor = side === 'y' ? 0.68 : 1;
   return fog * faceFactor;
+}
+
+/**
+ * Apply a shade factor to a colour by darkening its channels.
+ *
+ * Not by alpha, and that distinction was found by looking at a frame. Drawing a wall at alpha 0.6 makes it
+ * TRANSLUCENT, so the floor-and-ceiling boundary behind it shows straight through — a bright horizontal seam
+ * ran across every wall at the horizon, which reads as a rendering artefact rather than as distance. A wall is
+ * opaque; only its brightness changes. Darkening the colour says that, and alpha does not.
+ *
+ * Kept here rather than in the scene so the channel arithmetic is testable, and because the scene should not be
+ * the place bit-twiddling lives.
+ */
+export function shadeColor(base: number, factor: number): number {
+  const clamped = Math.max(0, Math.min(1, factor));
+  const r = Math.round(((base >> 16) & 0xff) * clamped);
+  const g = Math.round(((base >> 8) & 0xff) * clamped);
+  const b = Math.round((base & 0xff) * clamped);
+  return (r << 16) | (g << 8) | b;
 }

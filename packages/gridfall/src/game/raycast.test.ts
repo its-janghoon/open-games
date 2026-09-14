@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
 
 import { GRID_SIZE, isSolid } from './gridWorld';
-import { castColumn, castView, DEFAULT_FOV, MAX_DISTANCE, shade, wallHeight } from './raycast';
+import {
+  castColumn,
+  castView,
+  DEFAULT_FOV,
+  MAX_DISTANCE,
+  projectionDistance,
+  shade,
+  shadeColor,
+  wallHeight,
+} from './raycast';
 
 /** Points known to be in open space on this map, used as ray origins. */
 const OPEN_POINTS: [number, number][] = [
@@ -185,15 +194,52 @@ describe('the view', () => {
 });
 
 describe('projection', () => {
+  const WIDTH = 960;
+  const HEIGHT = 540;
+  const plane = projectionDistance(WIDTH);
+
+  it('derives the plane distance from the field of view, not from the viewport height', () => {
+    /**
+     * The defect a screenshot caught. wallHeight originally used the viewport HEIGHT as its numerator, which
+     * assumes the vertical field of view subtends exactly one world unit at one unit of distance. It does not:
+     * the vertical field follows from the horizontal one and the aspect ratio. At 60 degrees and 960 wide the
+     * correct value is 480 / tan(30°) ~= 831, so every wall was drawn at 65% of its true height and floated in
+     * a band around the horizon instead of meeting the floor.
+     */
+    expect(plane).toBeCloseTo(831.4, 1);
+    expect(plane, 'the viewport height is the wrong numerator').not.toBeCloseTo(HEIGHT, 0);
+  });
+
+  it('moves with the field of view rather than being a pasted constant', () => {
+    expect(projectionDistance(WIDTH, Math.PI / 2)).toBeLessThan(plane);
+    expect(projectionDistance(WIDTH, Math.PI / 6)).toBeGreaterThan(plane);
+  });
+
+  it('fills the view with a wall one unit away', () => {
+    // A wall you are standing next to must overflow the frame, not occupy half of it.
+    expect(wallHeight(1, plane)).toBeGreaterThan(HEIGHT);
+  });
+
+  it('gives a wall three tiles away roughly half the frame', () => {
+    // The number the broken version got wrong: 180 px where the geometry says about 277.
+    const height = wallHeight(3, plane);
+    expect(height).toBeGreaterThan(HEIGHT * 0.44);
+    expect(height).toBeLessThan(HEIGHT * 0.58);
+  });
+
   it('makes nearer walls taller', () => {
-    expect(wallHeight(1, 540)).toBeGreaterThan(wallHeight(4, 540));
+    expect(wallHeight(1, plane)).toBeGreaterThan(wallHeight(4, plane));
+  });
+
+  it('leaves a distant wall visible rather than sub-pixel', () => {
+    expect(wallHeight(MAX_DISTANCE, plane)).toBeGreaterThan(2);
   });
 
   it('does not produce an infinite column when pressed against a wall', () => {
     // Zero distance would divide by zero and draw a full-screen block, which reads as the renderer having
     // crashed rather than as standing very close to something.
-    expect(Number.isFinite(wallHeight(0, 540))).toBe(true);
-    expect(Number.isFinite(wallHeight(-1, 540))).toBe(true);
+    expect(Number.isFinite(wallHeight(0, plane))).toBe(true);
+    expect(Number.isFinite(wallHeight(-1, plane))).toBe(true);
   });
 });
 
@@ -208,6 +254,25 @@ describe('shading', () => {
 
   it('shades the two wall faces differently, or corners disappear', () => {
     expect(shade(3, 'y')).toBeLessThan(shade(3, 'x'));
+  });
+
+  it('darkens a colour by channel rather than by alpha', () => {
+    /**
+     * Found by looking at a frame, not by an assertion. Shading via alpha makes a wall TRANSLUCENT, so the
+     * floor-and-ceiling boundary behind it shows through as a bright horizontal seam across every wall at the
+     * horizon. A wall is opaque; only its brightness changes.
+     */
+    expect(shadeColor(0xffffff, 1)).toBe(0xffffff);
+    expect(shadeColor(0xffffff, 0)).toBe(0x000000);
+    expect(shadeColor(0x8040c0, 0.5)).toBe(0x402060);
+    // Channels must not bleed into one another, which is what a naive multiply of the whole integer would do.
+    expect(shadeColor(0x00ff00, 0.5)).toBe(0x008000);
+    expect(shadeColor(0x0000ff, 0.5)).toBe(0x000080);
+  });
+
+  it('clamps a shade factor outside 0..1 instead of overflowing a channel', () => {
+    expect(shadeColor(0x808080, 4)).toBe(0x808080);
+    expect(shadeColor(0x808080, -2)).toBe(0x000000);
   });
 
   it('stays within a drawable range at every distance', () => {

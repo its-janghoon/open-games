@@ -21,11 +21,22 @@ export class BootScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 44, 'Scaffolded from packages/_template', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '16px',
-        color: '#9aa7d4',
-      })
+      .text(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT / 2 + 52,
+        '아무 키나 눌러 시작  ·  press any key\n\nW A S D 이동 · \u2190 \u2192 또는 Q E 회전 · Space 발사\nmove · turn · fire',
+        {
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: '15px',
+          color: '#9aa7d4',
+          align: 'center',
+          lineSpacing: 6,
+        },
+      )
       .setOrigin(0.5);
+
+    const start = () => this.scene.start('Fps');
+    this.input.keyboard?.once('keydown', start);
+    this.input.once('pointerdown', start);
   }
 }
