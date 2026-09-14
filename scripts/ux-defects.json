@@ -37,8 +37,11 @@
       "game": "whiteout",
       "scene": "TownScene",
       "severity": "medium",
-      "what": "The objective banner overlaps a building's level label at 67%.",
-      "measured_cause": "'Level 1'@[457,165] against the banner body starting at [198,145]. The banner grew to two lines after the wrap fix, and the building label row above SAFE_AREA.TOP was not moved down to match."
+      "status": "CLOSED",
+      "what": "The objective banner overlapped a building's level badge at 67%.",
+      "measured_cause": "The safe area guaranteed the wrong thing. It kept every SPRITE below SAFE_AREA.TOP=172, but the level badge is deliberately drawn 12px ABOVE its sprite so a tall chimney cannot occlude it - so the badge was never covered by the promise, and nothing asserted it. The furnace's badge top landed at 162 and met the banner, which had grown to two lines when its wrap was fixed.",
+      "fix": "TownLayout gained LABEL_RESERVE (the badge's 12px gap plus half its rendered height; 12 not 8, because the Korean face runs taller - the kingshot HUD fix measured 30px at 18px bold). TownLayout.test.ts now asserts LABEL bounds as well as sprite bounds, which named exactly one offender - the furnace - and it was lowered from y=250 to 262.",
+      "verified": "Re-measured on the rebuilt game: whiteout's overlapping visible text pairs fell from 2 to 1. The one remaining is the welcome modal's Begin button over a building badge, which is a modal legitimately covering content and is left alone."
     },
     {
       "id": "stranded-save-guidance",

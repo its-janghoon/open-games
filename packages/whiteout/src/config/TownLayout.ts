@@ -30,6 +30,23 @@ export const SAFE_AREA = {
   MARGIN: 8,
 } as const;
 
+/**
+ * Vertical space a building's level badge needs ABOVE its sprite's top edge.
+ *
+ * This exists because the safe area guaranteed the wrong thing. It kept every
+ * SPRITE below TOP, and the badge is deliberately placed above its sprite so a
+ * tall chimney cannot occlude it - so the badge was never covered by the promise.
+ * Measured on the running game, 'Level 1' sat at y=165 with SAFE_AREA.TOP at 172
+ * and collided with the objective banner, which had grown to two lines when its
+ * wrap was fixed.
+ *
+ * The value is the scene's own badge geometry: a 12px gap above the sprite, plus
+ * half the badge's rendered height. Korean at 12px measures about 20px tall - the
+ * kingshot HUD fix established that this face runs taller than a Latin one at the
+ * same size, 30px at 18px bold - so 12 is the safe half-height, not 8.
+ */
+export const LABEL_RESERVE = 12 + 12;
+
 /** Usable vertical band for world content, derived from the reserved bands. */
 export const SAFE_HEIGHT = SAFE_AREA.BOTTOM - SAFE_AREA.TOP;
 
@@ -45,7 +62,11 @@ export const SAFE_HEIGHT = SAFE_AREA.BOTTOM - SAFE_AREA.TOP;
  * disappearing under the navigation bar is not.
  */
 export const BUILDING_LAYOUT: Record<BuildingKind, { x: number; y: number; scale: number }> = {
-  furnace: { x: 480, y: 250, scale: 2.0 },
+  // Lowered from 250 to 262. The sprite always cleared SAFE_AREA.TOP; its level
+  // badge did not, because the badge is drawn 12px above the sprite and nothing
+  // asserted that. At 250 the badge's top edge landed at 162 against a TOP of 172
+  // and met the objective banner, which grew to two lines when its wrap was fixed.
+  furnace: { x: 480, y: 262, scale: 2.0 },
   hunters_hut: { x: 250, y: 300, scale: 1.8 },
   sawmill: { x: 700, y: 300, scale: 1.8 },
   coal_pit: { x: 170, y: 388, scale: 1.8 },
