@@ -2,37 +2,33 @@
 /**
  * Mission gate: the shipped games must make ZERO third-party runtime requests.
  *
- * This is the first of the mission gates, and the one the others lean on. The
- * promise is that a player on metered data pays for the game and nothing else -
- * no font CDN, no analytics beacon, no ad call - and that the games keep working
+ * The promise is that a player on metered data pays for the game and nothing else
+ * - no font CDN, no analytics beacon, no ad call - and that the games keep working
  * when the network does not. A promise nobody measures decays, so it is a build
- * gate.
+ * gate, and its output is the evidence the sponsorship page is generated from.
  *
- * Runs on BUILT output, so `npm run build` must have produced it. Source is not
- * scanned on purpose: a dependency can emit a request the source never shows.
+ * Runs on BUILT output: a dependency can emit a request the source never shows.
  *
  * Usage:
- *   node scripts/check-network.mjs           # fail on anything not baselined
- *   node scripts/check-network.mjs --list    # print findings, exit 0
- *   node scripts/check-network.mjs --update  # rewrite the baseline
+ *   node scripts/check-network.mjs            # fail on anything not baselined
+ *   node scripts/check-network.mjs --list     # print findings, exit 0
+ *   node scripts/check-network.mjs --json     # machine-readable, for the report
  *   node scripts/check-network.mjs --selftest # prove the gate still detects
+ *   node scripts/check-network.mjs --update   # rewrite the baseline
  */
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, extname } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runGate } from './lib/gate-runner.mjs';
 import { scanHtml, scanCode, JS_SHAPES, CSS_SHAPES } from './lib/network-refs.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const BASELINE = join(ROOT, 'scripts', 'network-baseline.json');
-const SCAN_ROOTS = ['_site', ...readdirSyncSafe(join(ROOT, 'packages')).map((p) => `packages/${p}/dist`)];
 
 /**
  * A gate that reports zero is indistinguishable from a gate that is broken, and
- * this one currently reports zero on real output. So the both-directions proof is
- * built in rather than run once by hand: --selftest feeds it code that MUST trip
- * it and code that must NOT, and fails if either expectation breaks. scripts/ has
- * no test runner, so this is how the proof stays runnable.
+ * this one reports zero on real output - so the both-directions proof is built in
+ * and runs before every scan. scripts/ has no test runner, which is why the proof
+ * lives in the tool.
  */
 const SELFTEST = {
   html: {
@@ -78,7 +74,7 @@ const SELFTEST = {
 };
 
 function selftest() {
-  let bad = 0;
+  let problems = 0;
   const cases = [
     ['html', scanHtml(SELFTEST.html.text, 'selftest.html'), SELFTEST.html],
     ['css', scanCode(SELFTEST.css.text, 'selftest.css', CSS_SHAPES), SELFTEST.css],
@@ -90,7 +86,9 @@ function selftest() {
         `  selftest ${name}: expected ${spec.expect} finding(s), got ${found.length}` +
           ` -> ${found.map((f) => `${f.kind}@${f.host}`).join(', ')}`,
       );
-      bad += 1;
+      problems += 1;
+    } else {
+      console.log(`  selftest ${name}: ${found.length} caught, none leaked`);
     }
     for (const needle of spec.forbid) {
       // Checked against the matched TARGET only. An earlier version compared a
@@ -99,113 +97,26 @@ function selftest() {
       const leaked = found.filter((f) => `${f.host} ${f.target}`.includes(needle));
       if (leaked.length > 0) {
         console.error(`  selftest ${name}: FALSE POSITIVE on '${needle}' (${leaked[0].kind})`);
-        bad += 1;
+        problems += 1;
       }
     }
-    if (found.length === spec.expect) console.log(`  selftest ${name}: ${found.length} caught, none leaked`);
   }
-  if (bad > 0) {
-    console.error(`check:network selftest FAILED with ${bad} problem(s) - the gate itself is wrong.`);
-    process.exit(3);
-  }
-  console.log('check:network selftest OK - catches every request shape, ignores anchors and namespaces.');
+  return problems;
 }
 
-function readdirSyncSafe(dir) {
-  try {
-    return readdirSync(dir);
-  } catch {
+runGate({
+  name: 'check:network',
+  root: ROOT,
+  baselineFile: join(ROOT, 'scripts', 'network-baseline.json'),
+  promise:
+    'A player on metered data pays for the game and nothing else, and the games\n' +
+    'work offline. Remove the request, or - if it is genuinely not a runtime fetch\n' +
+    '- narrow the rule in scripts/lib/network-refs.mjs rather than baselining it.',
+  scan: (text, file, ext) => {
+    if (ext === '.html') return scanHtml(text, file);
+    if (ext === '.css') return scanCode(text, file, CSS_SHAPES);
+    if (ext === '.js' || ext === '.mjs') return scanCode(text, file, JS_SHAPES);
     return [];
-  }
-}
-
-function walk(dir, out = []) {
-  if (!existsSync(dir)) return out;
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else out.push(full);
-  }
-  return out;
-}
-
-if (process.argv.includes('--selftest')) {
-  selftest();
-  process.exit(0);
-}
-
-// Always self-check before trusting a scan result. Cheap (three regex passes over
-// a few hundred bytes) and it is the difference between "zero requests" and "the
-// gate stopped working".
-selftest();
-
-const files = [];
-for (const rel of SCAN_ROOTS) {
-  const abs = join(ROOT, rel);
-  if (!existsSync(abs)) continue;
-  files.push(...walk(abs));
-}
-
-if (files.length === 0) {
-  console.error(
-    'check:network found no built output to scan.\n' +
-      'This gate reads what SHIPS, so run `npm run build` first.\n' +
-      'Failing rather than passing: an empty scan is not evidence of compliance.',
-  );
-  process.exit(2);
-}
-
-const findings = [];
-for (const file of files) {
-  const rel = relative(ROOT, file);
-  const ext = extname(file).toLowerCase();
-  let text;
-  try {
-    text = readFileSync(file, 'utf8');
-  } catch {
-    continue; // binary asset
-  }
-  if (ext === '.html') findings.push(...scanHtml(text, rel));
-  else if (ext === '.css') findings.push(...scanCode(text, rel, CSS_SHAPES));
-  else if (ext === '.js' || ext === '.mjs') findings.push(...scanCode(text, rel, JS_SHAPES));
-}
-
-const key = (f) => `${f.file}::${f.kind}::${f.host}`;
-const baseline = existsSync(BASELINE) ? JSON.parse(readFileSync(BASELINE, 'utf8')) : { allowed: [] };
-const allowed = new Set(baseline.allowed.map((a) => `${a.file}::${a.kind}::${a.host}`));
-
-if (process.argv.includes('--update')) {
-  const allowedList = findings.map((f) => ({ file: f.file, kind: f.kind, host: f.host }));
-  writeFileSync(BASELINE, `${JSON.stringify({ allowed: allowedList }, null, 2)}\n`);
-  console.log(`check:network baseline updated with ${allowedList.length} entr(ies).`);
-  process.exit(0);
-}
-
-const unlisted = findings.filter((f) => !allowed.has(key(f)));
-
-if (process.argv.includes('--list')) {
-  console.log(`check:network scanned ${files.length} built file(s); ${findings.length} finding(s).`);
-  for (const f of findings) {
-    console.log(`  ${f.file}:${f.line}  ${f.kind}  host=${f.host}\n      ${f.target}`);
-  }
-  process.exit(0);
-}
-
-if (unlisted.length > 0) {
-  console.error(
-    `check:network FAILED: ${unlisted.length} third-party runtime request(s) in built output.\n` +
-      'The mission is that a player on metered data pays for the game and nothing\n' +
-      'else, and that the games work offline. Remove the request, or - if it is\n' +
-      'genuinely not a runtime fetch - narrow the rule in scripts/lib/network-refs.mjs\n' +
-      'rather than baselining it.\n',
-  );
-  for (const f of unlisted) {
-    console.error(`  ${f.file}:${f.line}  ${f.kind}  host=${f.host}\n      ${f.target}`);
-  }
-  process.exit(1);
-}
-
-console.log(
-  `check:network OK - ${files.length} built file(s) scanned, zero third-party runtime requests` +
-    `${allowed.size ? ` (${allowed.size} baselined)` : ''}.`,
-);
+  },
+  selftest,
+});

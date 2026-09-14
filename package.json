@@ -12,7 +12,7 @@
     "!packages/_template"
   ],
   "scripts": {
-    "build": "npm run build:games && npm run build:site && npm run check:network",
+    "build": "npm run build:games && npm run build:site && npm run check:network && npm run check:payments",
     "build:games": "npm run build --workspaces --if-present",
     "build:site": "node site/build.mjs",
     "docs:check": "node scripts/gen-readme.mjs --check",
@@ -23,6 +23,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check:panels": "node scripts/check-panel-bounds.mjs",
     "check:text": "node scripts/check-text-wrap.mjs",
-    "check:network": "node scripts/check-network.mjs"
+    "check:network": "node scripts/check-network.mjs",
+    "check:payments": "node scripts/check-payments.mjs"
   }
 }
