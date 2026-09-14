@@ -24,6 +24,8 @@ interface ChampionSelectProps {
   onUnlock: (championId: string) => void;
   onLockIn: (playerId: string, enemyId: string) => void;
   onBack?: () => void;
+  /** Import a pasted ghost code; returns what happened so the UI can say so. */
+  onImportGhost?: (code: string) => 'saved' | 'duplicate' | 'rejected';
   navControls?: ReactNode;
 }
 
@@ -44,9 +46,17 @@ export default function ChampionSelect({
   onUnlock,
   onLockIn,
   onBack,
+  onImportGhost,
   navControls,
 }: ChampionSelectProps) {
   const { t } = useTranslation();
+  /**
+   * Ghost paste state. A refusal is SHOWN rather than swallowed: a code arrives by
+   * being copied out of a chat message, so the common failure is a partial paste, and
+   * a field that quietly does nothing reads as the feature being broken.
+   */
+  const [ghostInput, setGhostInput] = useState('');
+  const [ghostNotice, setGhostNotice] = useState<string | null>(null);
   const firstUnlocked = CHAMPIONS.find((champion) =>
     profile.unlockedChampionIds.includes(champion.id),
   ) ?? CHAMPIONS[0];
@@ -241,6 +251,33 @@ export default function ChampionSelect({
               <button type="button" className="btn champion-select__randomize" onClick={handleRandomizeOpponent}>{t('select.randomize')}</button>
             </div>
 
+            {onImportGhost && (
+              <div className="champion-select__ghost">
+                <label htmlFor="ghost-code">{t('select.ghostLabel')}</label>
+                <input
+                  id="ghost-code"
+                  type="text"
+                  value={ghostInput}
+                  onChange={(event) => { setGhostInput(event.target.value); setGhostNotice(null); }}
+                  placeholder="0609-S040-G207-4B2G-NA0G"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    const outcome = onImportGhost(ghostInput);
+                    setGhostNotice(t(`select.ghost.${outcome}`));
+                    if (outcome === 'saved') setGhostInput('');
+                  }}
+                  disabled={ghostInput.trim().length === 0}
+                >
+                  {t('select.ghostImport')}
+                </button>
+                {ghostNotice && <p role="status" aria-live="polite">{ghostNotice}</p>}
+              </div>
+            )}
             <button type="button" className="champion-select__find-match" onClick={handleLockIn}>{t('select.findMatch')}</button>
             {onBack && <button type="button" className="btn champion-select__back" onClick={onBack}>{t('common.back')}</button>}
           </footer>

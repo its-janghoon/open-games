@@ -33,6 +33,11 @@ export default function ResultScreen({ outcome, profile, rewards, onRematch, onM
 
   useEffect(() => { headingRef.current?.focus(); }, []);
 
+  // The player's own code, if the match taught enough to learn one. Read-only here:
+  // sharing is a copy, and an editable field would invite editing a code that only
+  // means something as a whole.
+  const myGhostCode = profile.myGhostCode;
+
   const resultKey = outcome.result === 'win' ? 'victory' : outcome.result === 'loss' ? 'defeat' : outcome.result;
   const subtitleKey = outcome.result === 'win' ? 'winSubtitle' : outcome.result === 'loss' ? 'loseSubtitle' : `${outcome.result}Subtitle`;
 
@@ -94,6 +99,13 @@ export default function ResultScreen({ outcome, profile, rewards, onRematch, onM
       </div>
 
       <div className="result-screen__actions">
+{myGhostCode && (
+  <section className="result__ghost">
+    <h2>{t('result.yourGhost')}</h2>
+    <p><code>{myGhostCode}</code></p>
+    <p>{t('result.yourGhostHint')}</p>
+  </section>
+)}
         <button type="button" className="btn btn--primary" onClick={onRematch}>{t('result.rematch')} <span aria-hidden="true">↻</span></button>
         <button type="button" className="btn" onClick={onMenu}>{t('result.toMenu')}</button>
       </div>

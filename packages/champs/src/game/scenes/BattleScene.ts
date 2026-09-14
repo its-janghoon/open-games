@@ -30,8 +30,9 @@ import {
 } from '../combat';
 import { decideAction, type AiIntent, type AiSnapshot } from '../ai';
 import { GhostRecorder, intentForAction, type PlayerAction } from '../ghostRecorder';
+import { ghostDecide, type GhostPolicy } from '../ghost';
 import type { GhostObservation } from '../ghost';
-import { saveLearnedGhost } from '../../profile/ghostStore';
+import { ghostForOpponent, saveLearnedGhost } from '../../profile/ghostStore';
 import { loadProfile, saveProfile } from '../../profile';
 import {
   lowestHpRatioHostile,
@@ -229,6 +230,15 @@ export interface BattleSceneData {
   matchSeed: string;
   matchKind?: MatchKind;
   difficulty?: Difficulty;
+  /**
+   * A ghost code the player asked to fight, or undefined for the ordinary AI.
+   *
+   * Threaded through the scene DATA rather than read from storage inside the scene, so
+   * the choice travels with the match it belongs to. A scene that reached into the
+   * profile itself would silently change an in-progress match when the profile changed,
+   * and would make "which opponent am I fighting" unanswerable from the match request.
+   */
+  ghostCode?: string;
 }
 
 // Canvas dimensions (kept in sync with PhaserGame). The 3000x3000 rift world is
@@ -643,6 +653,12 @@ export default class BattleScene extends Phaser.Scene {
    * the recorder itself so a long match cannot grow memory.
    */
   private ghostRecorder = new GhostRecorder<GhostObservation>();
+  /**
+   * The ghost the bots play, or null for the ordinary AI. Resolved ONCE in create():
+   * decoding a code and reading the profile on every decision would put storage access
+   * and a base32 decode inside the simulation loop, several times a second per bot.
+   */
+  private opponentGhost: GhostPolicy | null = null;
   private goldAccrual = 0;
   private playerTotalGoldEarned = STARTING_GOLD;
   private playerDeaths = 0;
@@ -751,6 +767,16 @@ export default class BattleScene extends Phaser.Scene {
     }
     this.playerChampion =
       getChampionById(data.playerChampionId) ?? getChampionById('ashborne')!;
+    // Opt-in, and validated against what the profile actually holds: an unknown or
+    // corrupt code resolves to null and the match plays against the AI that has always
+    // worked, rather than against nothing.
+    this.opponentGhost = (() => {
+      try {
+        return ghostForOpponent(loadProfile(), data.ghostCode);
+      } catch {
+        return null;
+      }
+    })();
     this.enemyChampion =
       getChampionById(data.enemyChampionId) ?? getChampionById('nightveil')!;
 
@@ -2355,7 +2381,10 @@ export default class BattleScene extends Phaser.Scene {
       state.pendingIntent = null;
     }
     if (this.elapsed >= state.nextDecisionAt) {
-      state.pendingIntent = decideAction(this.buildAiSnapshot(bot, target));
+      const snapshot = this.buildAiSnapshot(bot, target);
+      state.pendingIntent = this.opponentGhost
+        ? ghostDecide(snapshot, this.opponentGhost)
+        : decideAction(snapshot);
       state.intentReadyAt = this.elapsed + cadence.reactionDelayMs / 1000;
       state.nextDecisionAt = this.elapsed + cadence.decisionIntervalMs / 1000;
     }

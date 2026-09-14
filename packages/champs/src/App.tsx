@@ -21,6 +21,7 @@ import {
   type LastMatchSetup,
   type MatchRewards,
 } from './profile';
+import { importGhostCode } from './profile/ghostStore';
 import {
   clearTelemetryData,
   denyTelemetryConsent,
@@ -85,6 +86,23 @@ export default function App() {
     return saved;
   }, []);
 
+  /**
+   * Import a pasted ghost code. Returns the outcome rather than a boolean so the screen
+   * can tell the player WHY a paste was refused - a truncated code and a duplicate are
+   * different problems with different fixes.
+   */
+  const handleImportGhost = useCallback(
+    (code: string) => {
+      const result = importGhostCode(profile, code);
+      if (result.outcome === 'saved') {
+        setProfile(result.profile);
+        save(result.profile);
+      }
+      return result.outcome;
+    },
+    [profile, save],
+  );
+
   const grantDiagnostics = useCallback(() => setTelemetryStatus(grantTelemetryConsent()), []);
   const denyDiagnostics = useCallback(() => setTelemetryStatus(denyTelemetryConsent()), []);
   const clearDiagnostics = useCallback(() => clearTelemetryData(), []);
@@ -98,8 +116,12 @@ export default function App() {
     URL.revokeObjectURL(url);
   }, []);
 
-  const enterBattle = useCallback((setup: MatchSetup) => {
+  const enterBattle = useCallback((setup: MatchSetup, ghostCode?: string) => {
     const issued = issueMatchRequest(profile, setup);
+    // Attached to the REQUEST, not to the setup: the setup is what gets persisted as
+    // lastSetup, and putting the opponent choice there would both survive into matches
+    // the player did not ask it for and need its own migration handling.
+    const request = ghostCode ? { ...issued.request, ghostCode } : issued.request;
     const nextProfile = setLastSetup(issued.profile, setup);
     save(nextProfile);
     setProfile(nextProfile);
@@ -110,7 +132,7 @@ export default function App() {
     setMode(setup.mode);
     setMatchKind(setup.matchKind);
     setDifficulty(setup.difficulty);
-    setMatch(issued.request);
+    setMatch(request);
     setOutcome(null);
     setRewards(null);
     setMatchNonce((nonce) => nonce + 1);
@@ -126,7 +148,12 @@ export default function App() {
   const handleModeSelect = (chosen: GameMode) => { setMode(chosen); setScreen('select'); };
   const handleLockIn = (playerChampionId: string, enemyChampionId: string) => {
     if (mode === 'conquest' && !profile.unlockedChampionIds.includes(playerChampionId)) return;
-    enterBattle({ playerChampionId, enemyChampionId, mode, matchKind, difficulty });
+    // The most recently added ghost is the opponent, and only in conquest: midline
+    // resolves its own roster from a match seed, so a ghost there would fight with a
+    // team the player never chose. Undefined leaves the ordinary AI in place, which is
+    // what every existing match keeps doing.
+    const ghostCode = mode === 'conquest' ? profile.ghostCodes[0] : undefined;
+    enterBattle({ playerChampionId, enemyChampionId, mode, matchKind, difficulty }, ghostCode);
   };
   const handleContinue = () => {
     const setup = profile.lastSetup;
@@ -195,7 +222,7 @@ export default function App() {
       <main className="app-main">
         {screen === 'menu' && <MainMenu profile={profile} accountLevel={accountLevelForXp(profile.accountXp)} onContinue={profile.lastSetup ? handleContinue : undefined} onStandard={() => beginFlow('standard')} onPractice={() => beginFlow('practice')} onTutorial={() => beginFlow('tutorial')} />}
         {screen === 'mode' && <ModeSelect selected={mode} matchKind={matchKind} difficulty={difficulty} onDifficultyChange={setDifficulty} onSelect={handleModeSelect} onBack={() => setScreen('menu')} />}
-        {screen === 'select' && <ChampionSelect mode={mode} profile={profile} accountLevel={accountLevelForXp(profile.accountXp)} onUnlock={handleUnlock} onLockIn={handleLockIn} onBack={() => setScreen('mode')} navControls={controls} />}
+        {screen === 'select' && <ChampionSelect mode={mode} profile={profile} accountLevel={accountLevelForXp(profile.accountXp)} onUnlock={handleUnlock} onLockIn={handleLockIn} onBack={() => setScreen('mode')} onImportGhost={handleImportGhost} navControls={controls} />}
         {screen === 'battle' && match && <BattleScreen match={match} matchNonce={matchNonce} settingsOpen={settingsOpen} onGameEnd={handleGameEnd} onQuit={() => setScreen('select')} />}
         {screen === 'result' && outcome && rewards && <ResultScreen outcome={outcome} profile={profile} rewards={rewards} onRematch={handleRematch} onMenu={() => setScreen('menu')} />}
       </main>

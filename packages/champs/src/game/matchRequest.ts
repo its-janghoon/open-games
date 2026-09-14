@@ -5,6 +5,15 @@ import type { ChampsProfile, LastMatchSetup } from '../profile/types';
 export interface MatchRequest extends LastMatchSetup {
   matchId: string;
   matchSeed: string;
+  /**
+   * A ghost code the player asked to fight, or undefined for the ordinary AI.
+   *
+   * Carried on the REQUEST so the opponent choice travels with the match it belongs to.
+   * PhaserGame spreads the request straight into the scene data, so this is the whole
+   * hop - the scene never reads the profile to decide who it is fighting, which is what
+   * keeps an in-progress match from changing when the profile does.
+   */
+  ghostCode?: string;
 }
 
 export interface IssuedMatchRequest {

@@ -45,7 +45,14 @@
     "unlockAria": "Unlock {{champion}} for {{cost}} currency",
     "randomRoster": "Random Roster",
     "randomRosterDescription": "All ten champions are available here. Your actual 5v5 roster is drawn from the match seed when battle starts—there is no unlock fee.",
-    "randomRosterRule": "The same seed always produces the same disjoint teams; a rematch issues a new seed."
+    "randomRosterRule": "The same seed always produces the same disjoint teams; a rematch issues a new seed.",
+    "ghostLabel": "Fight a ghost",
+    "ghostImport": "Add code",
+    "ghost": {
+      "saved": "Ghost added. It will be your opponent next match.",
+      "duplicate": "You already have that ghost.",
+      "rejected": "That code is not readable — check for a missing character."
+    }
   },
   "client": {
     "home": "Home",
@@ -135,7 +142,9 @@
       "nexus-destroyed": "Core destroyed",
       "hard-cap-score": "Hard-cap score",
       "surrendered": "Abandoned by player"
-    }
+    },
+    "yourGhost": "Your ghost code",
+    "yourGhostHint": "Share it and a friend can fight the way you play."
   },
   "mode": {
     "eyebrow": "BATTLE PROTOCOL",

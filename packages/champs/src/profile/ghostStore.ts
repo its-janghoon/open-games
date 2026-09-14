@@ -50,7 +50,17 @@ export function saveLearnedGhost(
  * feature is broken. Newest first, capped, and duplicates are reported rather than
  * silently collapsing the list.
  */
-export function importGhostCode(profile: ChampsProfile, code: string): GhostStoreResult {
+/**
+ * The outcomes an IMPORT can produce. Narrower than GhostStoreResult on purpose:
+ * 'too-few-observations' belongs to learning, not to pasting, and a UI that had to
+ * handle it would need a message for a case that can never happen.
+ */
+export interface GhostImportResult {
+  profile: ChampsProfile;
+  outcome: 'saved' | 'duplicate' | 'rejected';
+}
+
+export function importGhostCode(profile: ChampsProfile, code: string): GhostImportResult {
   const decoded = decodeGhost(code);
   if (!decoded.ok) return { profile, outcome: 'rejected' };
 
