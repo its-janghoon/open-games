@@ -14,3 +14,4 @@ export * from './phaserScale';
 export * from './touch';
 export * from './locale';
 export * from './viewport';
+export * from './rollback';
