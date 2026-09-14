@@ -18,8 +18,36 @@ export interface AccessibleModal {
 
 let activeModalHost: HTMLElement | null = null;
 
+/**
+ * Whether the last input the user gave was a key rather than a pointer.
+ *
+ * This gates whether opening a canvas modal MOVES focus into it. Moving focus is
+ * right for someone navigating by keyboard or with a screen reader, but the
+ * mirrored control reveals itself on `:focus-visible`, and a programmatic
+ * `.focus()` satisfies that even when the modal was opened by a mouse click - so
+ * a sighted mouse user got a high-contrast label chip planted over the top of the
+ * HUD. That is what the reported overlap actually was: a "용광로" box sitting
+ * inside the resource bar, not a mislaid game object.
+ *
+ * The modal is still announced either way - it carries role="dialog" and
+ * aria-modal, and Tab reaches it because it is in the DOM. Only the automatic
+ * focus jump is withheld from pointer users.
+ */
+let lastInputWasKeyboard = false;
+let modalityBound = false;
+
+function trackInputModality(): void {
+  if (modalityBound || typeof document === 'undefined') return;
+  modalityBound = true;
+  document.addEventListener('keydown', () => { lastInputWasKeyboard = true; }, true);
+  for (const event of ['pointerdown', 'mousedown', 'touchstart'] as const) {
+    document.addEventListener(event, () => { lastInputWasKeyboard = false; }, true);
+  }
+}
+
 function root(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
+  trackInputModality();
   let node = document.getElementById('a11y-controls');
   if (!node) {
     node = document.createElement('nav');
@@ -134,6 +162,7 @@ export function beginModal(scene: Phaser.Scene, label: string): AccessibleModal 
   };
   dialog.addEventListener('keydown', onKeyDown);
   let closed = false;
+  let movedFocus = false;
   const close = (): void => {
     if (closed) return;
     closed = true;
@@ -144,10 +173,23 @@ export function beginModal(scene: Phaser.Scene, label: string): AccessibleModal 
       child.inert = false;
       child.removeAttribute('aria-hidden');
     }
-    previousFocus?.focus();
+    // Only hand focus back if we took it. Restoring focus we never moved would
+    // itself plant a visible chip on a mouse user, which is the bug this guards.
+    if (movedFocus) previousFocus?.focus();
   };
   scene.events.once(Phaser.Scenes.Events.SHUTDOWN, close);
-  return { focusFirst: () => queueMicrotask(() => focusables()[0]?.focus()), close };
+  return {
+    focusFirst: () => {
+      if (!lastInputWasKeyboard) return;
+      queueMicrotask(() => {
+        const first = focusables()[0];
+        if (!first) return;
+        movedFocus = true;
+        first.focus();
+      });
+    },
+    close,
+  };
 }
 
 /** Announce status/error/result changes without requiring canvas inspection. */
