@@ -92,6 +92,14 @@ export class TownScene extends Phaser.Scene {
    * left and right margins match.
    */
   private static readonly HUD_MARGIN = 24;
+  /** Left/right inset for the objective strip's text. */
+  private static readonly OBJECTIVE_TEXT_INSET = 14;
+  /** Horizontal space the Skip button claims at the strip's right end. */
+  private static readonly OBJECTIVE_SKIP_W = 88;
+  /** Vertical padding inside the objective strip. */
+  private static readonly OBJECTIVE_PAD_Y = 8;
+  /** Gap between the strip's heading and its instruction line. */
+  private static readonly OBJECTIVE_LINE_GAP = 3;
 
   private state!: GameState;
   private audio!: AudioManager;
@@ -114,6 +122,8 @@ export class TownScene extends Phaser.Scene {
   /** Heading line of the banner: '다음 목표 · <step label>'. */
   private objectiveHeading?: Phaser.GameObjects.Text;
   private objectiveLabel?: Phaser.GameObjects.Text;
+  private objectiveBannerBg?: Phaser.GameObjects.Rectangle;
+  private objectiveSkip?: Phaser.GameObjects.Container;
   private objectivePointer?: Phaser.GameObjects.Container;
   /** The objective id currently reflected in the banner/pointer, or null. */
   private currentObjectiveId: string | null = null;
@@ -907,21 +917,27 @@ export class TownScene extends Phaser.Scene {
       .rectangle(bannerX, bannerY, bannerW, bannerH, 0x0d1420, 0.9)
       .setOrigin(0.5)
       .setStrokeStyle(2, PALETTE.ACCENT, 0.9);
-    // Two-line layout: the "다음 목표 · <step label>" heading on top, the
-    // instruction below, both fitting the 44px strip. The heading surfaces the
-    // objective LABEL (previously defined + tested but never rendered) so the
-    // step's short title reads above its longer instruction.
+    // The Skip button sits at the strip's right end, so the text may only use
+    // the space to its LEFT. Without a wrap width the instruction ran straight
+    // under the button and out past the frame - the captured frame showed a
+    // stray "ly." floating outside the panel - because a Phaser Text lays out on
+    // one line however long the string is, and these strings are translated, so
+    // no length is safe to assume.
+    const textW = bannerW - TownScene.OBJECTIVE_TEXT_INSET * 2 - TownScene.OBJECTIVE_SKIP_W;
+    const textLeft = bannerX - bannerW / 2 + TownScene.OBJECTIVE_TEXT_INSET;
     const heading = this.add
-      .text(bannerX - bannerW / 2 + 14, bannerY - 11, tr('objective.title'), textStyle(12, { fontStyle: 'bold', color: PALETTE.ACCENT_CSS }))
-      .setOrigin(0, 0.5)
+      .text(textLeft, bannerY, tr('objective.title'), textStyle(12, { fontStyle: 'bold', color: PALETTE.ACCENT_CSS, wordWrap: { width: textW } }))
+      .setOrigin(0, 0)
       .setShadow(0, 1, '#000000', 2, true, true);
     const instruction = this.add
-      .text(bannerX - bannerW / 2 + 14, bannerY + 10, '', textStyle(12, { color: PALETTE.FROST_CSS }))
-      .setOrigin(0, 0.5)
+      .text(textLeft, bannerY, '', textStyle(12, { color: PALETTE.FROST_CSS, wordWrap: { width: textW } }))
+      .setOrigin(0, 0)
       .setShadow(0, 1, '#000000', 2, true, true);
     const skip = Menu.button(this, bannerX + bannerW / 2 - 42, bannerY, tr('objective.skip'), () => this.state.markGuidedComplete(Date.now()), { width: 72, height: 36, fontSize: 11, padX: 4, padY: 4 });
     banner.add([bg, heading, instruction, skip.container]);
     this.objectiveBanner = banner;
+    this.objectiveBannerBg = bg;
+    this.objectiveSkip = skip.container;
     this.objectiveHeading = heading;
     this.objectiveLabel = instruction;
 
@@ -942,6 +958,35 @@ export class TownScene extends Phaser.Scene {
     }
 
     this.objectivePointer = pointer;
+  }
+
+  /**
+   * Resize the objective strip to the text it currently holds and stack the two
+   * lines from its top edge.
+   *
+   * The strip cannot keep a fixed 44px height once the text wraps: the strings
+   * are translated, so the same objective is one line in one language and two in
+   * another, and a fixed height clipped whichever was taller. Height is derived
+   * from the measured Text bounds instead, which is also what the layout test
+   * asserts against.
+   */
+  private reflowObjectiveBanner(): void {
+    const bg = this.objectiveBannerBg;
+    const heading = this.objectiveHeading;
+    const instruction = this.objectiveLabel;
+    if (!bg || !heading || !instruction) return;
+
+    const padY = TownScene.OBJECTIVE_PAD_Y;
+    const gap = TownScene.OBJECTIVE_LINE_GAP;
+    const contentH = heading.height + gap + instruction.height;
+    const height = Math.max(44, contentH + padY * 2);
+    bg.setSize(bg.width, height);
+
+    const top = bg.y - height / 2 + padY;
+    heading.setY(top);
+    instruction.setY(top + heading.height + gap);
+    // The Skip button stays centred on the strip however tall it grows.
+    this.objectiveSkip?.setY(bg.y);
   }
 
   /**
@@ -994,6 +1039,8 @@ export class TownScene extends Phaser.Scene {
     // banner reads "다음 목표 · 용광로 올리기" with the instruction beneath.
     this.objectiveHeading.setText(`${tr('objective.title')} · ${tr(objective.label)}`);
     this.objectiveLabel.setText(tr(objective.instruction));
+    // Text changed, so the strip's height and line stacking have to follow it.
+    this.reflowObjectiveBanner();
 
     // Position the pointer over the target building's map slot (above its
     // sprite). Hide it for objectives with no building target.
