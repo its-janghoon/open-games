@@ -2,7 +2,6 @@
   "_why": "Measured inventory of what is actually wrong in the shipped games right now, re-derived from running builds rather than from memory of an old screenshot. Phase 2 works from this, and a gate is only added where the defect has a provable shape.",
   "measured": "2026-09-14",
   "method": "All five games rebuilt and deployed to a local static server, then driven over the Chrome DevTools Protocol. Layout defects come from the live display list (scripts/lib/text-overlap-probe.js); economy claims come from Node against the real systems.",
-
   "closed_in_phase_0": [
     "whiteout coal deadlock - a resource required from the first second whose only producer was gated behind an upgrade that itself cost it",
     "whiteout town safe area - the nav row covered the two lowest building rows",
@@ -11,7 +10,6 @@
     "kingshot stone circularity - the same shape as the coal deadlock",
     "panel bounds and text wrap, now gated by check:panels and check:text"
   ],
-
   "open": [
     {
       "id": "kingshot-hud-rows",
@@ -29,7 +27,7 @@
       "game": "kingshot",
       "scene": "TownScene",
       "severity": "medium",
-      "what": "The build-hint tooltip overlaps building lock labels: 41% against '잠김 (중앙 청사 Lv.3 필요)'@[707,347] and 6% against another at [477,372].",
+      "what": "The build-hint tooltip overlaps building lock labels: 41% against '\uc7a0\uae40 (\uc911\uc559 \uccad\uc0ac Lv.3 \ud544\uc694)'@[707,347] and 6% against another at [477,372].",
       "measured_cause": "The tooltip is placed relative to the building it points at, with no awareness of the lock labels that sit at the same band. Distinct from the HUD row defect - this is one floating element versus a row of static labels, not a spacing constant."
     },
     {
@@ -49,7 +47,7 @@
       "severity": "high",
       "status": "CLOSED",
       "what": "A save with no fuel and no producer showed a red warning and advice the player could not follow.",
-      "measured_cause": "Node proves a NEW game is correct - wood 200, coal 100, warmth 100 - so this was never a boot defect; the screenshots showed a stranded save left in the browser profile by earlier probing. The defect was the guidance. whiteout told that player to 'keep timber and coal stocked and upgrade the Furnace', every part of which needs timber, and kingshot said '화롯불 꺼져감! 목재 확보'. After the phase-0 rescue fix there IS exactly one affordable action - the producer that costs only non-fuel resources - and neither game named it.",
+      "measured_cause": "Node proves a NEW game is correct - wood 200, coal 100, warmth 100 - so this was never a boot defect; the screenshots showed a stranded save left in the browser profile by earlier probing. The defect was the guidance. whiteout told that player to 'keep timber and coal stocked and upgrade the Furnace', every part of which needs timber, and kingshot said '\ud654\ub86f\ubd88 \uaebc\uc838\uac10! \ubaa9\uc7ac \ud655\ubcf4'. After the phase-0 rescue fix there IS exactly one affordable action - the producer that costs only non-fuel resources - and neither game named it.",
       "fix": "whiteout's ObjectiveSystem gained STRANDED_ADVISORY, which outranks the low-warmth advisory when no timber producer stands and points at the Sawmill (rations only). kingshot's warning choice moved out of TownScene into config/ColdGuidance as pure functions and names the Lumber Mill (rations and stone, no firewood). The condition is on PRODUCTION, not stock: a hold with three timber and no producer is in the same trap a few seconds earlier.",
       "verified": "14 new tests across the two games, all in Node with no browser. They pin the honesty of the advice as a property, not the wording: the named building must cost nothing that appears in FUEL_PER_SECOND, must actually produce that fuel, and every resource it does cost must appear in the gather floor - so re-pricing it in firewood later fails the build instead of silently making the advice impossible again. Two existing advisory tests were retargeted to a hold that has a producer rather than weakened."
     },
@@ -58,7 +56,11 @@
       "game": "all five",
       "severity": "high",
       "what": "Audio ships as uncompressed WAV: 855 KB (lastwar) to 1270 KB (whiteout) gzipped, larger than the Phaser engine.",
-      "measured_cause": "gzip cannot compress PCM. Ogg/Opus would cut this by roughly an order of magnitude. This is UX on a cheap phone as much as it is bytes."
+      "measured_cause": "gzip cannot compress PCM. Ogg/Opus would cut this by roughly an order of magnitude. This is UX on a cheap phone as much as it is bytes.",
+      "status": "CLOSED",
+      "fix": "scripts/convert-audio.mjs re-encodes every WAV to Ogg/Opus plus an AAC/m4a fallback, at two bitrate profiles because a 22-second music loop and a 40ms UI click have different budgets. Phaser's loader already took a url ARRAY, so a browser requests only the first format it supports.",
+      "verified": "4352 KB of WAV became 775 KB of Opus or 862 KB of AAC. Verified in a real browser rather than trusting the encoder: all 12 of whiteout's audio keys decode with durations matching the originals, and the page fetched the .ogg variant. Per-game totals fell: whiteout 1997 to 1213 KB, wirework 1373 to 781, kingshot 2001 to 1383, lastwar 1834 to 1327.",
+      "narrowed_by_measurement": "One file per game was nearly the whole cost - whiteout's music_loop.wav was 1,176,044 of its 1,270 KB - so the win was concentrated, not spread across 49 files."
     },
     {
       "id": "korean-font-subsetting",
@@ -68,13 +70,11 @@
       "measured_cause": "whiteout ships two NanumGothicCoding weights totalling 76 KB. lastwar ships one NotoSansKR weight at 557 KB, kingshot Galmuri11 at 504 KB, champs two NotoSansKR weights at 1.09 MB - the last named .subset but evidently not subset to the glyphs used. champs also PRELOADS both from index.html, making its cold load 1226 KB against 366-394 KB for the others."
     }
   ],
-
   "checked_and_clean": [
     "lastwar RunScene: 17 visible texts, zero overlapping pairs",
     "every game's TitleScene: zero overlapping pairs",
     "171 asset paths across five games all present and same-origin (check:selfhosted)",
     "zero third-party runtime requests, zero payment integrations (check:network, check:payments)"
   ],
-
   "measurement_trap_recorded": "The first overlap pass reported 324 pairs in kingshot and 39 in whiteout. Nearly all were text inside CLOSED panels still sitting in the display list: the probe tested each object's own .visible but not its ancestors'. Walking the parentContainer chain for visibility and alpha, and dropping offscreen text, brought the honest counts to 8 and 2. Any future display-list rule must use effective visibility, not .visible."
 }

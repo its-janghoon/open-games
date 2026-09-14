@@ -50,21 +50,34 @@ export const IMAGES: readonly ImageAsset[] = [
   { key: TextureKeys.UiBarFrame, url: 'assets/ui/bar_frame.png' },
 ];
 export const AUDIO: readonly AudioAsset[] = [
-  { key: AudioKeys.TetherFire, urls: ['assets/audio/tether_fire.wav'] },
-  { key: AudioKeys.WireAttach, urls: ['assets/audio/wire_attach.wav'] },
-  { key: AudioKeys.SwingWhoosh, urls: ['assets/audio/swing_whoosh.wav'] },
-  { key: AudioKeys.Slash, urls: ['assets/audio/arc_cut.wav'] },
-  { key: AudioKeys.Hit, urls: ['assets/audio/machine_hit.wav'] },
-  { key: AudioKeys.MachineShutdown, urls: ['assets/audio/machine_shutdown.wav'] },
-  { key: AudioKeys.AttackSurveyor, urls: ['assets/audio/attack_surveyor.wav'] },
-  { key: AudioKeys.AttackSkitter, urls: ['assets/audio/attack_skitter.wav'] },
-  { key: AudioKeys.AttackRammer, urls: ['assets/audio/attack_rammer.wav'] },
-  { key: AudioKeys.AttackFluxborn, urls: ['assets/audio/attack_fluxborn.wav'] },
-  { key: AudioKeys.AttackBastion, urls: ['assets/audio/attack_bastion.wav'] },
-  { key: AudioKeys.AttackBombard, urls: ['assets/audio/attack_bombard.wav'] },
-  { key: AudioKeys.CitizenAlarm, urls: ['assets/audio/citizen_alarm.wav'] },
-  { key: AudioKeys.UiClick, urls: ['assets/audio/ui_click.wav'] },
-  { key: AudioKeys.MusicLoop, urls: ['assets/audio/music_loop.wav'] },
+/**
+ * Audio ships as TWO formats per sound, and the loader picks one.
+ *
+ * Ogg/Opus is much the smaller - 4352 KB of WAV across the games became 775 KB of
+ * Opus - but older iOS Safari cannot play it, and this project targets cheap phones.
+ * AAC in m4a plays everywhere. Phaser's loader takes this url ARRAY and requests the
+ * first format the browser reports it can play, so a player downloads exactly one;
+ * only the repo and the deploy carry both.
+ *
+ * WAV was replaced because it is uncompressed PCM: gzip cannot shrink it, so the
+ * transfer was the raw samples, and audio was measured as the largest single cost in
+ * every game - larger than the Phaser engine itself.
+ */
+  { key: AudioKeys.TetherFire, urls: ['assets/audio/tether_fire.ogg', 'assets/audio/tether_fire.m4a'] },
+  { key: AudioKeys.WireAttach, urls: ['assets/audio/wire_attach.ogg', 'assets/audio/wire_attach.m4a'] },
+  { key: AudioKeys.SwingWhoosh, urls: ['assets/audio/swing_whoosh.ogg', 'assets/audio/swing_whoosh.m4a'] },
+  { key: AudioKeys.Slash, urls: ['assets/audio/arc_cut.ogg', 'assets/audio/arc_cut.m4a'] },
+  { key: AudioKeys.Hit, urls: ['assets/audio/machine_hit.ogg', 'assets/audio/machine_hit.m4a'] },
+  { key: AudioKeys.MachineShutdown, urls: ['assets/audio/machine_shutdown.ogg', 'assets/audio/machine_shutdown.m4a'] },
+  { key: AudioKeys.AttackSurveyor, urls: ['assets/audio/attack_surveyor.ogg', 'assets/audio/attack_surveyor.m4a'] },
+  { key: AudioKeys.AttackSkitter, urls: ['assets/audio/attack_skitter.ogg', 'assets/audio/attack_skitter.m4a'] },
+  { key: AudioKeys.AttackRammer, urls: ['assets/audio/attack_rammer.ogg', 'assets/audio/attack_rammer.m4a'] },
+  { key: AudioKeys.AttackFluxborn, urls: ['assets/audio/attack_fluxborn.ogg', 'assets/audio/attack_fluxborn.m4a'] },
+  { key: AudioKeys.AttackBastion, urls: ['assets/audio/attack_bastion.ogg', 'assets/audio/attack_bastion.m4a'] },
+  { key: AudioKeys.AttackBombard, urls: ['assets/audio/attack_bombard.ogg', 'assets/audio/attack_bombard.m4a'] },
+  { key: AudioKeys.CitizenAlarm, urls: ['assets/audio/citizen_alarm.ogg', 'assets/audio/citizen_alarm.m4a'] },
+  { key: AudioKeys.UiClick, urls: ['assets/audio/ui_click.ogg', 'assets/audio/ui_click.m4a'] },
+  { key: AudioKeys.MusicLoop, urls: ['assets/audio/music_loop.ogg', 'assets/audio/music_loop.m4a'] },
 ];
 export const ENEMY_TEXTURE_BY_ROLE: Record<string, TextureKey> = {
   surveyor: TextureKeys.MachineSurveyor, skitter: TextureKeys.MachineSkitter, rammer: TextureKeys.MachineRammer,

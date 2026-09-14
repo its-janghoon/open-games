@@ -154,13 +154,26 @@ export const IMAGES: readonly ImageAsset[] = [
 
 /** Audio assets (WAV plays natively in all evergreen browsers + Phaser WebAudio). */
 export const AUDIO: readonly AudioAsset[] = [
-  { key: AudioKeys.UiClick, urls: ['assets/audio/ui_click.wav'] },
-  { key: AudioKeys.BuildComplete, urls: ['assets/audio/build_complete.wav'] },
-  { key: AudioKeys.TrainComplete, urls: ['assets/audio/train_complete.wav'] },
-  { key: AudioKeys.BattleHit, urls: ['assets/audio/battle_hit.wav'] },
-  { key: AudioKeys.Victory, urls: ['assets/audio/victory.wav'] },
-  { key: AudioKeys.Defeat, urls: ['assets/audio/defeat.wav'] },
-  { key: AudioKeys.MusicLoop, urls: ['assets/audio/music_loop.wav'] },
+/**
+ * Audio ships as TWO formats per sound, and the loader picks one.
+ *
+ * Ogg/Opus is much the smaller - 4352 KB of WAV across the games became 775 KB of
+ * Opus - but older iOS Safari cannot play it, and this project targets cheap phones.
+ * AAC in m4a plays everywhere. Phaser's loader takes this url ARRAY and requests the
+ * first format the browser reports it can play, so a player downloads exactly one;
+ * only the repo and the deploy carry both.
+ *
+ * WAV was replaced because it is uncompressed PCM: gzip cannot shrink it, so the
+ * transfer was the raw samples, and audio was measured as the largest single cost in
+ * every game - larger than the Phaser engine itself.
+ */
+  { key: AudioKeys.UiClick, urls: ['assets/audio/ui_click.ogg', 'assets/audio/ui_click.m4a'] },
+  { key: AudioKeys.BuildComplete, urls: ['assets/audio/build_complete.ogg', 'assets/audio/build_complete.m4a'] },
+  { key: AudioKeys.TrainComplete, urls: ['assets/audio/train_complete.ogg', 'assets/audio/train_complete.m4a'] },
+  { key: AudioKeys.BattleHit, urls: ['assets/audio/battle_hit.ogg', 'assets/audio/battle_hit.m4a'] },
+  { key: AudioKeys.Victory, urls: ['assets/audio/victory.ogg', 'assets/audio/victory.m4a'] },
+  { key: AudioKeys.Defeat, urls: ['assets/audio/defeat.ogg', 'assets/audio/defeat.m4a'] },
+  { key: AudioKeys.MusicLoop, urls: ['assets/audio/music_loop.ogg', 'assets/audio/music_loop.m4a'] },
 ] as const;
 
 /**

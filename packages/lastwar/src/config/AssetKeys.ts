@@ -184,22 +184,35 @@ export const IMAGES: readonly ImageAsset[] = [
 
 /** Audio assets (WAV plays natively in all evergreen browsers + Phaser WebAudio). */
 export const AUDIO: readonly AudioAsset[] = [
-  { key: AudioKeys.UiClick, urls: ['assets/audio/ui_click.wav'] },
-  { key: AudioKeys.GatePass, urls: ['assets/audio/gate_pass.wav'] },
-  { key: AudioKeys.Shoot, urls: ['assets/audio/shoot.wav'] },
-  { key: AudioKeys.Hit, urls: ['assets/audio/hit.wav'] },
-  { key: AudioKeys.LevelUp, urls: ['assets/audio/level_up.wav'] },
-  { key: AudioKeys.Victory, urls: ['assets/audio/victory.wav'] },
-  { key: AudioKeys.Defeat, urls: ['assets/audio/defeat.wav'] },
-  { key: AudioKeys.MusicLoop, urls: ['assets/audio/music_loop.wav'] },
+/**
+ * Audio ships as TWO formats per sound, and the loader picks one.
+ *
+ * Ogg/Opus is much the smaller - 4352 KB of WAV across the games became 775 KB of
+ * Opus - but older iOS Safari cannot play it, and this project targets cheap phones.
+ * AAC in m4a plays everywhere. Phaser's loader takes this url ARRAY and requests the
+ * first format the browser reports it can play, so a player downloads exactly one;
+ * only the repo and the deploy carry both.
+ *
+ * WAV was replaced because it is uncompressed PCM: gzip cannot shrink it, so the
+ * transfer was the raw samples, and audio was measured as the largest single cost in
+ * every game - larger than the Phaser engine itself.
+ */
+  { key: AudioKeys.UiClick, urls: ['assets/audio/ui_click.ogg', 'assets/audio/ui_click.m4a'] },
+  { key: AudioKeys.GatePass, urls: ['assets/audio/gate_pass.ogg', 'assets/audio/gate_pass.m4a'] },
+  { key: AudioKeys.Shoot, urls: ['assets/audio/shoot.ogg', 'assets/audio/shoot.m4a'] },
+  { key: AudioKeys.Hit, urls: ['assets/audio/hit.ogg', 'assets/audio/hit.m4a'] },
+  { key: AudioKeys.LevelUp, urls: ['assets/audio/level_up.ogg', 'assets/audio/level_up.m4a'] },
+  { key: AudioKeys.Victory, urls: ['assets/audio/victory.ogg', 'assets/audio/victory.m4a'] },
+  { key: AudioKeys.Defeat, urls: ['assets/audio/defeat.ogg', 'assets/audio/defeat.m4a'] },
+  { key: AudioKeys.MusicLoop, urls: ['assets/audio/music_loop.ogg', 'assets/audio/music_loop.m4a'] },
   // FEAT-005 SFX.
-  { key: AudioKeys.Recruit, urls: ['assets/audio/recruit.wav'] },
-  { key: AudioKeys.UpgradeComplete, urls: ['assets/audio/upgrade_complete.wav'] },
-  { key: AudioKeys.BattleHit, urls: ['assets/audio/battle_hit.wav'] },
-  { key: AudioKeys.BattleWin, urls: ['assets/audio/battle_win.wav'] },
-  { key: AudioKeys.BattleLose, urls: ['assets/audio/battle_lose.wav'] },
-  { key: AudioKeys.TabSwitch, urls: ['assets/audio/tab_switch.wav'] },
-  { key: AudioKeys.Reward, urls: ['assets/audio/reward.wav'] },
+  { key: AudioKeys.Recruit, urls: ['assets/audio/recruit.ogg', 'assets/audio/recruit.m4a'] },
+  { key: AudioKeys.UpgradeComplete, urls: ['assets/audio/upgrade_complete.ogg', 'assets/audio/upgrade_complete.m4a'] },
+  { key: AudioKeys.BattleHit, urls: ['assets/audio/battle_hit.ogg', 'assets/audio/battle_hit.m4a'] },
+  { key: AudioKeys.BattleWin, urls: ['assets/audio/battle_win.ogg', 'assets/audio/battle_win.m4a'] },
+  { key: AudioKeys.BattleLose, urls: ['assets/audio/battle_lose.ogg', 'assets/audio/battle_lose.m4a'] },
+  { key: AudioKeys.TabSwitch, urls: ['assets/audio/tab_switch.ogg', 'assets/audio/tab_switch.m4a'] },
+  { key: AudioKeys.Reward, urls: ['assets/audio/reward.ogg', 'assets/audio/reward.m4a'] },
 ] as const;
 
 /**
