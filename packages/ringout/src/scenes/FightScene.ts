@@ -25,6 +25,8 @@ import {
   type FightState,
 } from '../game/fightState';
 import { poseFor, segments, type Pose } from '../game/pose';
+import { EMPTY_TALLY, recordRound, type Tally } from '../game/tally';
+import { tr, type Language, type TrKey } from '../i18n/strings';
 
 /**
  * The fight, drawn from geometry alone.
@@ -45,6 +47,20 @@ export class FightScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Graphics;
   private banner!: Phaser.GameObjects.Text;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
+  private language: Language = 'ko';
+  private tallyText!: Phaser.GameObjects.Text;
+  private hint!: Phaser.GameObjects.Text;
+
+  /**
+   * The running score, and the reason it lives on the SCENE rather than in FightState: it is not part of
+   * the rollback. Nothing in the simulation reads it, it is never rewound, and putting it in the snapshot
+   * would make the scoreline something a desync could corrupt for no benefit. It survives a rematch
+   * because a scene restart passes it forward explicitly.
+   */
+  private tally: Tally = EMPTY_TALLY;
+
+  /** Set once a round has ended and been counted, so a rematch cannot award the same round twice. */
+  private counted = false;
 
   /**
    * Left-over real time not yet converted into ticks.
@@ -61,7 +77,10 @@ export class FightScene extends Phaser.Scene {
     super('Fight');
   }
 
-  create(): void {
+  create(data?: { language?: Language; tally?: Tally }): void {
+    this.language = data?.language ?? this.language;
+    this.tally = data?.tally ?? EMPTY_TALLY;
+    this.counted = false;
     this.session = new RollbackSession(createFightSimulation(['p1', 'p2']), {
       participants: ['p1', 'p2'],
       maxRollbackTicks: 180,
@@ -83,6 +102,26 @@ export class FightScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setVisible(false);
+
+    this.hint = this.add
+      .text(GAME_WIDTH / 2, 200, tr('result.rematch', this.language), {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '18px',
+        color: '#69ffa8',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setVisible(false);
+
+    // The tally sits between the two hp bars, so each player reads their own score on their own side.
+    this.tallyText = this.add
+      .text(GAME_WIDTH / 2, 32, '', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '22px',
+        color: '#9aa7d4',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0);
 
     // Two players on one keyboard. Both hands get the same shape: three directions plus three
     // attacks, so neither side is a worse control scheme than the other.
@@ -247,17 +286,55 @@ export class FightScene extends Phaser.Scene {
       g.fillRect(fill.x, fill.y, fill.width, fill.height);
     });
 
+    this.tallyText.setText(
+      tr('result.tally', this.language, { left: this.tally.left, right: this.tally.right }),
+    );
+
     if (state.outcome.kind === 'ongoing') {
       this.banner.setVisible(false);
+      this.hint.setVisible(false);
       return;
     }
-    const text =
+
+    // Counted once. `draw()` runs every frame, so without the guard a finished round would add a point
+    // per frame — the sort of bug that looks like the scoring being wildly wrong rather than like a
+    // missing flag.
+    if (!this.counted) {
+      this.counted = true;
+      this.tally = recordRound(this.tally, state.outcome, ['p1', 'p2']);
+      this.armRematch();
+    }
+
+    const key: TrKey =
       state.outcome.kind === 'draw'
-        ? '무승부 / DRAW'
+        ? 'result.draw'
         : state.outcome.kind === 'ringout'
-          ? `링아웃 / RING OUT — ${state.outcome.winner}`
-          : `K.O. — ${state.outcome.winner}`;
-    this.banner.setText(text).setVisible(true);
+          ? 'result.ringout'
+          : 'result.ko';
+    const winner =
+      state.outcome.kind === 'draw'
+        ? ''
+        : tr(state.outcome.winner === 'p1' ? 'player.p1' : 'player.p2', this.language);
+    this.banner.setText(tr(key, this.language, { winner })).setVisible(true);
+    this.hint.setVisible(true);
+    this.tallyText.setText(
+      tr('result.tally', this.language, { left: this.tally.left, right: this.tally.right }),
+    );
+  }
+
+  /**
+   * Wait for a key, then restart carrying the score forward.
+   *
+   * A short delay first, because the round ends on the same frame a player was still holding an attack
+   * button, and a rematch that triggered on that keypress would skip the result screen entirely.
+   */
+  private armRematch(): void {
+    this.time.delayedCall(700, () => {
+      const again = () =>
+        this.scene.start('Fight', { language: this.language, tally: this.tally });
+      this.input.keyboard?.once('keydown', again);
+      this.input.once('pointerdown', again);
+    });
   }
 }
 

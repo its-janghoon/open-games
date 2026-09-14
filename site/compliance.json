@@ -41,7 +41,7 @@
       "promise": "The games stay small enough for a metered connection, and cannot quietly grow.",
       "checkedBy": "check:budget, gzipped bytes per game per asset class against committed ceilings.",
       "verdict": "pass",
-      "measured": "First wait 161.4–394.9 KB; full download 338–1654.7 KB.",
+      "measured": "First wait 161.4–394.9 KB; full download 339–1654.7 KB.",
       "games": [
         {
           "slug": "champs",
@@ -83,10 +83,10 @@
         },
         {
           "slug": "ringout",
-          "firstWaitKB": 336.7,
-          "totalKB": 338,
+          "firstWaitKB": 337.7,
+          "totalKB": 339,
           "byClassKB": {
-            "js": 337.1,
+            "js": 338.1,
             "html": 0.9
           }
         },
