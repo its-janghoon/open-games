@@ -55,8 +55,9 @@ export const SHOT_FLIGHT_SECONDS = 0.2;
  *
  * This is the JOIN between the extracted step and the rollback core, and its value is
  * diagnostic before it is functional: whatever a resimulation gets wrong here names the state
- * still missing from WorldState. Structures, minion waves and gold are NOT in it yet, so this
- * simulation is a faithful model of a fight between champions and nothing else.
+ * still missing from WorldState. Gold and structures are now in it; MINION WAVES are not, so this
+ * simulation is a faithful model of a fight between champions plus their economy and their
+ * buildings, and not yet of a whole match.
  *
  * BattleScene remains the authority for real matches. Nothing here is wired into it.
  */
