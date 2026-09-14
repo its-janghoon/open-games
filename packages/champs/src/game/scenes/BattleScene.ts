@@ -31,6 +31,7 @@ import {
 import { decideAction, type AiIntent, type AiSnapshot } from '../ai';
 import { GhostRecorder, intentForAction, type PlayerAction } from '../ghostRecorder';
 import { ghostDecide, type GhostPolicy } from '../ghost';
+import { moveUnitToward as moveUnitTowardPure } from '../worldStep';
 import type { GhostObservation } from '../ghost';
 import { ghostForOpponent, saveLearnedGhost } from '../../profile/ghostStore';
 import { loadProfile, saveProfile } from '../../profile';
@@ -3020,13 +3021,26 @@ export default class BattleScene extends Phaser.Scene {
         candidate.unit.hp / candidate.unit.maxHp < 0.35 && distance(u.pos, candidate.unit.pos) <= 700 * SCALE,
     ) ? 25 * SCALE : 0;
     const effectState = entity?.effects;
-    const travel = Math.min(
-      d,
-      (u.moveSpeed * smokeMultiplier * (1 + (effectState ? strongestMovementBuff(effectState, this.elapsed) : 0)) + huntingBonus) *
-        (1 - (effectState ? strongestSlow(effectState, this.elapsed) : 0)) * dt,
+    // The arithmetic itself lives in game/worldStep so a headless rollback step and the
+    // scene cannot drift apart. The scene keeps deciding WHAT the modifiers are; the
+    // extracted function decides what they do.
+    const travel = moveUnitTowardPure(
+      u,
+      goal,
+      dt,
+      {
+        speedMultiplier: smokeMultiplier,
+        flatBonus: huntingBonus,
+        buffFraction: effectState ? strongestMovementBuff(effectState, this.elapsed) : 0,
+        slowFactor: effectState ? strongestSlow(effectState, this.elapsed) : 0,
+      },
+      {
+        minX: OFF_X,
+        maxX: OFF_X + WORLD_SIZE * SCALE,
+        minY: OFF_Y,
+        maxY: OFF_Y + WORLD_SIZE * SCALE,
+      },
     );
-    u.pos.x = this.clampX(u.pos.x + ((goal.x - u.pos.x) / d) * travel);
-    u.pos.y = this.clampY(u.pos.y + ((goal.y - u.pos.y) / d) * travel);
     const champion = this.entityForUnit(u);
     if (champion === this.player && travel > 0) this.recordLearning('move');
     if (champion?.champion?.id === 'duskarrow' && travel > 0) {
