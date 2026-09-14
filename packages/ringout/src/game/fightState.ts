@@ -146,7 +146,22 @@ export interface RingRules {
 }
 
 export const RING: RingRules = {
-  halfWidth: 420,
+  /**
+   * Half-width of the ring. 170, not the 420 this started at, and the reason is a measurement rather
+   * than taste.
+   *
+   * A fighting game has a hard requirement that BOTH fighters are always on screen — a player cannot
+   * react to someone they cannot see. At 420 the ring is 840 units wide against a fighter roughly 70
+   * tall, twelve fighter-heights, and no camera can satisfy both that requirement and legibility: to
+   * fit 840 units in a 960-wide frame the zoom drops to 1.14, which puts a fighter at 15% of frame
+   * height. That was the defect a screenshot showed.
+   *
+   * The previous commit claimed shrinking the ring would break the balance numbers, because walk speed
+   * would cross it in about 0.6 s. That was computed against a much smaller ring than the one actually
+   * needed. At 170 the crossing is 340 / 4.2 = 81 ticks, about 1.35 s, which is a normal stage traversal
+   * for a fighter. The claim was wrong and the ring was simply too wide.
+   */
+  halfWidth: 170,
   floorY: 0,
   gravity: 1.4,
   jumpSpeed: 15,
@@ -195,7 +210,8 @@ export function createFighter(id: string, side: Side): Fighter {
   return {
     id,
     side,
-    x: side === 'left' ? -140 : 140,
+    // Inside the 170-half-width ring with room to retreat, not pinned against the edge.
+    x: side === 'left' ? -95 : 95,
     y: RING.floorY,
     vx: 0,
     vy: 0,

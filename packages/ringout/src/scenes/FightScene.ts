@@ -3,7 +3,10 @@ import { RollbackSession } from '@open-games/shared';
 
 import { GAME_HEIGHT, GAME_WIDTH } from '../config/GameConfig';
 import {
+  cameraFor,
   FLOOR_SCREEN_Y,
+  project,
+  type CameraFrame,
   HP_BAR,
   hpBarRect,
   hpFillRect,
@@ -11,7 +14,6 @@ import {
   PALETTE,
   ringEdges,
   TORSO_WIDTH,
-  worldToScreen,
 } from '../config/View';
 import { createFightSimulation } from '../game/fightSimulation';
 import {
@@ -67,7 +69,10 @@ export class FightScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor(PALETTE.background);
     this.graphics = this.add.graphics();
-    this.hud = this.add.graphics();
+    // The HUD is pinned to the screen, not to the world. A zooming camera would slide and rescale the
+    // hp bars every time the fighters moved, which makes the one thing a player checks under pressure
+    // the least stable thing on screen.
+    this.hud = this.add.graphics().setScrollFactor(0);
 
     this.banner = this.add
       .text(GAME_WIDTH / 2, 150, '', {
@@ -76,6 +81,7 @@ export class FightScene extends Phaser.Scene {
         color: '#eef2ff',
       })
       .setOrigin(0.5)
+      .setScrollFactor(0)
       .setVisible(false);
 
     // Two players on one keyboard. Both hands get the same shape: three directions plus three
@@ -155,7 +161,12 @@ export class FightScene extends Phaser.Scene {
     const g = this.graphics;
     g.clear();
 
-    const edges = ringEdges();
+    // Frame the fight, then project everything through that frame. Phaser's camera is deliberately
+    // left alone: zooming it shrank the visible band to 169 px and pushed the floor off screen.
+    const frame = cameraFor(state.fighters.map((fighter) => fighter.x));
+    const to = (x: number, y: number) => project(x, y, frame);
+
+    const edges = ringEdges(frame);
     g.lineStyle(3, PALETTE.floor, 1);
     g.beginPath();
     g.moveTo(edges.left, FLOOR_SCREEN_Y);
@@ -168,37 +179,43 @@ export class FightScene extends Phaser.Scene {
     for (const x of [edges.left, edges.right]) {
       g.beginPath();
       g.moveTo(x, FLOOR_SCREEN_Y);
-      g.lineTo(x, FLOOR_SCREEN_Y - 210);
+      g.lineTo(x, FLOOR_SCREEN_Y - 210 * frame.zoom);
       g.strokePath();
     }
 
     state.fighters.forEach((fighter, index) => {
       const colour = index === 0 ? PALETTE.fighterLeft : PALETTE.fighterRight;
-      this.drawFighter(g, poseFor(fighter, state.tick), colour);
+      this.drawFighter(g, poseFor(fighter, state.tick), colour, frame);
       const box = hitBox(fighter, state.tick);
       if (box) {
         // The live hitbox is drawn. In a fighter the box IS the mechanic, and hiding it means the
         // player has to infer their own range from damage they took — a much worse teacher.
-        const topLeft = worldToScreen(box.x - box.halfWidth, box.y + box.halfHeight);
+        const topLeft = to(box.x - box.halfWidth, box.y + box.halfHeight);
         g.lineStyle(2, PALETTE.hitbox, 0.9);
-        g.strokeRect(topLeft.x, topLeft.y, box.halfWidth * 2, box.halfHeight * 2);
+        g.strokeRect(topLeft.x, topLeft.y, box.halfWidth * 2 * frame.zoom, box.halfHeight * 2 * frame.zoom);
       }
     });
 
     this.drawHud(state);
   }
 
-  private drawFighter(g: Phaser.GameObjects.Graphics, pose: Pose, colour: number): void {
+  private drawFighter(
+    g: Phaser.GameObjects.Graphics,
+    pose: Pose,
+    colour: number,
+    frame: CameraFrame,
+  ): void {
     const strikingSegment =
       pose.striking === 'armFront' ? 3 : pose.striking === 'legFront' ? 7 : -1;
 
     segments(pose).forEach(([from, to], index) => {
-      const a = worldToScreen(from.x, from.y);
-      const b = worldToScreen(to.x, to.y);
+      const a = project(from.x, from.y, frame);
+      const b = project(to.x, to.y, frame);
       const torso = index <= 1;
       const isStriking = index === strikingSegment;
+      const width = (torso ? TORSO_WIDTH : LIMB_WIDTH) * frame.zoom;
       g.lineStyle(
-        torso ? TORSO_WIDTH : LIMB_WIDTH,
+        width,
         isStriking ? PALETTE.strikingLimb : colour,
         1,
       );
@@ -209,13 +226,13 @@ export class FightScene extends Phaser.Scene {
       // Round the joints by hand. Phaser's Graphics has no line cap, so a chain of plain strokes
       // shows a notch at every bend; a dot at each end closes it for the price of one circle.
       g.fillStyle(isStriking ? PALETTE.strikingLimb : colour, 1);
-      g.fillCircle(a.x, a.y, (torso ? TORSO_WIDTH : LIMB_WIDTH) / 2);
-      g.fillCircle(b.x, b.y, (torso ? TORSO_WIDTH : LIMB_WIDTH) / 2);
+      g.fillCircle(a.x, a.y, width / 2);
+      g.fillCircle(b.x, b.y, width / 2);
     });
 
-    const head = worldToScreen(pose.head.x, pose.head.y);
+    const head = project(pose.head.x, pose.head.y, frame);
     g.fillStyle(colour, 1);
-    g.fillCircle(head.x, head.y, pose.headRadius);
+    g.fillCircle(head.x, head.y, pose.headRadius * frame.zoom);
   }
 
   private drawHud(state: FightState): void {

@@ -41,7 +41,7 @@ describe('fight state contract', () => {
     copy.tick = 500;
     copy.outcome = { kind: 'draw' };
     expect(original.fighters[0].hp).toBe(RING.maxHp);
-    expect(original.fighters[0].x).toBe(-140);
+    expect(original.fighters[0].x).toBe(-95);
     expect(original.tick).toBe(0);
     expect(original.outcome).toEqual({ kind: 'ongoing' });
   });
