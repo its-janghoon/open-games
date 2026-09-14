@@ -1,0 +1,20 @@
+{
+  "_why": "Measured state of the mission's offline promise, kept in the repo so a passing build is not mistaken for a kept promise.",
+  "measured": "2026-09-14",
+  "method": "Chrome DevTools Protocol (playwright is not installed on the build host): load the built game from a local static server, warm the cache, set Network.emulateNetworkConditions offline=true, reload, and read window.__GAME__ and the active scene list.",
+  "result": {
+    "boots_offline": false,
+    "observed": "Chrome's ERR_INTERNET_DISCONNECTED page. window.__GAME__ absent, zero active scenes.",
+    "game_probed": "whiteout",
+    "requests_when_online": 53,
+    "all_same_origin": true,
+    "service_worker_present": false
+  },
+  "why_it_fails": "Nothing caches the game. Every request is same-origin under the game's own directory, which is necessary for offline play but not sufficient: without a service worker the browser still has to reach the server, so a cold reload with no network cannot even fetch index.html.",
+  "what_is_gated_today": "check:selfhosted asserts the precondition that is true and worth keeping: every asset path a bundle names exists in dist and none is cross-origin. It deliberately does NOT claim the games boot offline.",
+  "to_make_it_true": [
+    "Add a service worker per game that precaches the cold-load set (index.html, the JS chunks, the fonts) on install and serves it cache-first, then caches audio and sprites on first use.",
+    "Register it from the game's entry point, and keep the registration a no-op when the page is not served over http(s) so a file:// open still works.",
+    "Extend this gate to drive the CDP offline probe once a worker exists, so the claim is measured rather than asserted."
+  ]
+}
