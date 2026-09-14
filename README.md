@@ -25,6 +25,7 @@ the deploy workflow are all generated from it.
 | [`packages/kingshot`](./packages/kingshot) | **Kingdom Rise** (킹덤 라이즈) | Strategy / Idle | Vite + TypeScript + Phaser 3.80 | A medieval kingdom builder with idle resource output, a town-center-gated building tree, troop training queues, and wave-based combat. |
 | [`packages/lastwar`](./packages/lastwar) | **LAST SQUAD** (라스트 스쿼드) | Squad Auto-Battler | Vite + TypeScript + Phaser 3.80 | A survival base-builder and squad auto-battler with a story campaign, endless horde defense, and a lane gate-runner mini-game. |
 | [`packages/wirework`](./packages/wirework) | **Wirework** (Wirework) | Top-down Ring Defense Action | Vite + TypeScript + Phaser 3.80 | Tether through a capacitor city and cut rear cooling nodes to stop autonomous siege machines. |
+| [`packages/gridfall`](./packages/gridfall) | **Gridfall** (그리드폴) _(WIP)_ | Local-network Raycast Shooter | Vite + TypeScript + Phaser 3.80 | A two-player shooter rendered by raycasting a tile grid into vertical columns — no textures, no models, no 3D scene. Built on the same rollback core as Ringout so two people on one network can play with no server between them. |
 | [`packages/ringout`](./packages/ringout) | **Ringout** (링아웃) _(WIP)_ | Two-player Geometric Fighter | Vite + TypeScript + Phaser 3.80 | A two-body fighter drawn entirely from geometric parts, with no sprite sheets and no animation frames — every pose is computed. Built to be rolled back, so two people on the same network can fight with no server between them. |
 
 <!-- games:end -->
@@ -157,6 +158,7 @@ configured in that game's `vite.config.ts` (production base `/open-games/<slug>/
 | `https://savagemanage.github.io/open-games/kingshot/` | `packages/kingshot` |
 | `https://savagemanage.github.io/open-games/lastwar/` | `packages/lastwar` |
 | `https://savagemanage.github.io/open-games/wirework/` | `packages/wirework` |
+| `https://savagemanage.github.io/open-games/gridfall/` | `packages/gridfall` |
 | `https://savagemanage.github.io/open-games/ringout/` | `packages/ringout` |
 
 <!-- urls:end -->

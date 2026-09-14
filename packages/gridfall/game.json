@@ -1,0 +1,15 @@
+{
+  "slug": "gridfall",
+  "title": "Gridfall",
+  "titleKo": "\uadf8\ub9ac\ub4dc\ud3f4",
+  "genre": "Local-network Raycast Shooter",
+  "summary": "A two-player shooter rendered by raycasting a tile grid into vertical columns \u2014 no textures, no models, no 3D scene. Built on the same rollback core as Ringout so two people on one network can play with no server between them.",
+  "summaryKo": "\ud0c0\uc77c \uaca9\uc790\ub97c \ub808\uc774\uce90\uc2a4\ud305\ud574 \uc218\uc9c1 \uae30\ub465\uc73c\ub85c \uadf8\ub9ac\ub294 2\uc778 \uc288\ud130. \ud14d\uc2a4\ucc98\ub3c4, \ubaa8\ub378\ub3c4, 3D \uc52c\ub3c4 \uc5c6\uc2b5\ub2c8\ub2e4. \ub9c1\uc544\uc6c3\uacfc \uac19\uc740 \ub864\ubc31 \ucf54\uc5b4 \uc704\uc5d0 \uc62c\ub824 \uac19\uc740 \ub124\ud2b8\uc6cc\ud06c\uc758 \ub450 \uc0ac\ub78c\uc774 \uc11c\ubc84 \uc5c6\uc774 \ud50c\ub808\uc774\ud569\ub2c8\ub2e4.",
+  "stack": [
+    "typescript",
+    "phaser3"
+  ],
+  "status": "wip",
+  "focus": "active",
+  "focusNote": "Phase 7: the rollback core against a 3D-looking world whose state is still plain data."
+}

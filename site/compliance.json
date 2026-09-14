@@ -7,7 +7,7 @@
     "passing": 5,
     "thirdPartyRequests": 0,
     "paymentIntegrations": 0,
-    "games": 6
+    "games": 7
   },
   "claims": [
     {
@@ -15,7 +15,7 @@
       "promise": "The games contact nobody. No font CDN, no analytics, no ad call.",
       "checkedBy": "check:network, on the BUILT bundles - a dependency can emit a request the source never shows.",
       "verdict": "pass",
-      "measured": "318 built files scanned, 0 third-party request(s) found.",
+      "measured": "322 built files scanned, 0 third-party request(s) found.",
       "findings": [],
       "note": "An <a href> to the project’s own repository is not counted: it fetches nothing until a reader chooses to follow it. Counting those would have reported 13 violations where the honest number is zero."
     },
@@ -24,7 +24,7 @@
       "promise": "The games cannot take money. There is no purchase path to hide.",
       "checkedBy": "check:payments, matching processor hosts and SDK call shapes rather than payment words.",
       "verdict": "pass",
-      "measured": "318 built files scanned, 0 payment integration(s) found.",
+      "measured": "322 built files scanned, 0 payment integration(s) found.",
       "findings": [],
       "note": "The word “purchase” appears 40 times in these bundles and every one is gameplay - Arena Champions is a MOBA with an in-match item shop. A gate matching words would report 40 violations against an honest zero, so it matches integrations instead."
     },
@@ -33,7 +33,7 @@
       "promise": "Every asset a game loads comes from the game itself.",
       "checkedBy": "check:selfhosted, resolving every asset path a bundle names against what shipped.",
       "verdict": "pass",
-      "measured": "232 asset paths across 6 games, 0 missing or cross-origin.",
+      "measured": "234 asset paths across 7 games, 0 missing or cross-origin.",
       "findings": []
     },
     {
@@ -41,7 +41,7 @@
       "promise": "The games stay small enough for a metered connection, and cannot quietly grow.",
       "checkedBy": "check:budget, gzipped bytes per game per asset class against committed ceilings.",
       "verdict": "pass",
-      "measured": "First wait 161.4–394.9 KB; full download 339–1654.7 KB.",
+      "measured": "First wait 161.4–394.9 KB; full download 332.2–1654.7 KB.",
       "games": [
         {
           "slug": "champs",
@@ -54,6 +54,15 @@
             "css": 14,
             "other": 2.3,
             "html": 1.7
+          }
+        },
+        {
+          "slug": "gridfall",
+          "firstWaitKB": 330.9,
+          "totalKB": 332.2,
+          "byClassKB": {
+            "js": 331.3,
+            "html": 0.9
           }
         },
         {

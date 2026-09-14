@@ -62,11 +62,19 @@
       }
     },
     "ringout": {
-      "coldLoad": 365977,
-      "total": 367362,
+      "coldLoad": 373493,
+      "total": 374878,
       "byClass": {
-        "js": 366378,
-        "html": 17295
+        "js": 373895,
+        "html": 17294
+      }
+    },
+    "gridfall": {
+      "coldLoad": 365980,
+      "total": 367367,
+      "byClass": {
+        "js": 366382,
+        "html": 17296
       }
     }
   },
