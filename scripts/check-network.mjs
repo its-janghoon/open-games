@@ -67,9 +67,14 @@ const SELFTEST = {
       'import("https://esm.sh/left-pad");',
       '// licence header, must NOT trip: https://opensource.org/licenses/Apache-2.0',
       'const local = await fetch("/api/local");',
+      // Must trip: a STUN server is a third-party request on every match, and no other rule here can see it —
+      // `stun:` is not an http(s) URL, so the remote-origin shapes all miss it.
+      "new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });",
+      // Must NOT trip: an empty list is the whole design of the transport — host candidates only, no third party.
+      'new RTCPeerConnection({ iceServers: [] });',
     ].join('\n'),
-    expect: 6,
-    forbid: ['opensource.org', '/api/local'],
+    expect: 7,
+    forbid: ['opensource.org', '/api/local', 'iceServers: []'],
   },
 };
 

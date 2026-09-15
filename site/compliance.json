@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-14",
+  "generated": "2026-09-15",
   "generatedBy": "scripts/gen-compliance.mjs",
   "howToReproduce": "npm run build — every claim below is a gate the build already runs.",
   "summary": {
@@ -58,10 +58,10 @@
         },
         {
           "slug": "gridfall",
-          "firstWaitKB": 339.1,
-          "totalKB": 340.4,
+          "firstWaitKB": 342.4,
+          "totalKB": 343.6,
           "byClassKB": {
-            "js": 339.5,
+            "js": 342.7,
             "html": 0.9
           }
         },

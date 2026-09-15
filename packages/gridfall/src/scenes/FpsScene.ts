@@ -17,6 +17,9 @@ import { NetSession } from '@open-games/shared';
 import { hashGridWorld } from '../game/gridSimulation';
 import { FONT_STACK } from '../config/fontStack';
 import { CueSynth } from '@open-games/shared';
+import type { PeerLink } from '@open-games/shared';
+import { createAnswer, createOffer, type RtcOptions } from '@open-games/shared';
+import { createConnectPanel, type ConnectPanel } from '../net/connectPanel';
 
 /**
  * The first-person view, drawn from geometry alone.
@@ -87,6 +90,7 @@ export class FpsScene extends Phaser.Scene {
   /** Set once the result has been shown, so the rematch is armed exactly once. */
   private resultShown = false;
   private readonly cues = new CueSynth();
+  private connectPanel?: ConnectPanel;
   /**
    * The previously DRAWN state, for cue transitions.
    *
@@ -149,6 +153,7 @@ export class FpsScene extends Phaser.Scene {
       p2TurnLeft: K.U,
       p2TurnRight: K.O,
       p2Fire: K.ENTER,
+      openNetwork: K.N,
     }) as Record<string, Phaser.Input.Keyboard.Key>;
 
     this.banner = this.add
@@ -198,6 +203,21 @@ export class FpsScene extends Phaser.Scene {
       networked: () => this.net !== undefined,
       columns: () => castView(this.eye(), COLUMNS),
       /**
+       * The real transport, exposed for verification only.
+       *
+       * Node has no RTCPeerConnection, so the unit tests can cover the connection CODES and nothing else. The only way
+       * to prove a genuine DTLS/SCTP handshake and a genuine data channel is to drive two peers in a real browser —
+       * which needs the module reachable from the page, and this is the handle that already exists for exactly this
+       * kind of measurement.
+       */
+      rtc: {
+        createOffer: (opts?: RtcOptions) => createOffer<FpsInput>(opts),
+        createAnswer: (code: string, opts?: RtcOptions) => createAnswer<FpsInput>(code, opts),
+        // Asserts the mission property rather than trusting the constructor call site: an empty list means no STUN,
+        // no TURN, and so no third-party request per match.
+        iceServersUsed: () => [] as string[],
+      },
+      /**
        * Hide the interface, keeping the world.
        *
        * For the landing-page thumbnail, which shows gameplay and not the interface on all five older games. It
@@ -236,6 +256,26 @@ export class FpsScene extends Phaser.Scene {
     this.transport = undefined;
   }
 
+  /**
+   * Offer the real-network path on N.
+   *
+   * Created lazily on first use rather than at scene start: it appends DOM, and a player who never plays over the
+   * network should not carry an overlay they never open.
+   */
+  private openConnectPanel(): void {
+    if (this.net) return; // Already in a networked match; a second link would fight the first.
+    if (!this.connectPanel) {
+      this.connectPanel = createConnectPanel({
+        language: this.language,
+        onConnected: (link, participant) => {
+          this.role = participant;
+          this.startNetworked(link, participant);
+        },
+      });
+    }
+    this.connectPanel.open();
+  }
+
   private connectIfAnotherTabIsOpen(): void {
     if (!tabTransportAvailable()) return;
     const transport = openTabTransport();
@@ -246,18 +286,26 @@ export class FpsScene extends Phaser.Scene {
     // Gated on a CONFIRMED peer, not on the role settling: p1's role resolves on a timeout, which is also what
     // happens when it is alone, so upgrading there would put a lone tab into a networked match against nobody.
     transport.onPeer(() => {
-      void transport.role.then((role) => this.startNetworked(transport, role));
+      void transport.role.then((role) => this.startNetworked(transport.link, role));
     });
   }
 
-  private startNetworked(transport: TabTransport, role: Role): void {
+  /**
+   * Start a networked session on any link.
+   *
+   * Takes a PeerLink rather than a TabTransport, because the link is the only thing this needed from it and there are
+   * now two transports: the BroadcastChannel between contexts of one browser, and an RTCDataChannel between two
+   * machines on one network. Everything below is identical for both — which is the payoff of the netcode never having
+   * held a socket.
+   */
+  private startNetworked(link: PeerLink<FpsInput>, role: Role): void {
     if (this.net) return;
     this.session = undefined;
     this.net = new NetSession<GridWorld, FpsInput>({
       sim: createGridSimulation(['p1', 'p2']),
       participants: ['p1', 'p2'],
       localParticipant: role,
-      link: transport.link,
+      link,
       hashState: hashGridWorld,
       checksumInterval: 60,
       maxRollbackTicks: 240,
@@ -298,6 +346,8 @@ export class FpsScene extends Phaser.Scene {
   }
 
   update(_time: number, deltaMs: number): void {
+    // JustDown rather than isDown: a held key would reopen the panel every frame.
+    if (Phaser.Input.Keyboard.JustDown(this.keys.openNetwork)) this.openConnectPanel();
     // Clamped so a tab backgrounded for a minute does not try to simulate a minute in one frame and hang the
     // page. Dropping that time is the honest trade; nobody was watching.
     this.carry += Math.min(deltaMs / 1000, 0.25);

@@ -62,6 +62,17 @@ const JS_SHAPES = [
   ['XHR .open()', new RegExp(String.raw`\.open\s*\(\s*["'\`][A-Z]+["'\`]\s*,\s*["'\`]${REMOTE}`, 'g')],
   ['.src = remote', new RegExp(String.raw`\.src\s*=\s*["'\`]${REMOTE}`, 'g')],
   ['import from remote', new RegExp(String.raw`\bfrom\s*["'\`]${REMOTE}`, 'g')],
+  /**
+   * A STUN or TURN server is a third-party request per match, and it is invisible to every other rule here because
+   * `stun:` is not an http(s) URL.
+   *
+   * Added when the WebRTC transport landed. That transport works with an EMPTY iceServers list -- host candidates
+   * only, which is exactly what reaches another machine on the same local network and is the whole of what the games
+   * claim. Adding a public STUN server is the obvious way to make connections succeed more often, and it would
+   * quietly turn a zero-third-party game into one that pings someone else's infrastructure every time two people
+   * play. This makes that a build failure rather than a decision nobody notices.
+   */
+  ['ICE server (stun:/turn:)', /["'`](?:stuns?|turns?):[^"'`\s]+/g],
 ];
 
 /** CSS shapes that fetch. */

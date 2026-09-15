@@ -17,3 +17,4 @@ export * from './viewport';
 export * from './rollback';
 export * from './netcode';
 export * from './cueSynth';
+export * from './rtcTransport';
