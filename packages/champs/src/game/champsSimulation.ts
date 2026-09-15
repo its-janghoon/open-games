@@ -7,6 +7,7 @@ import { initialGold } from './rift/economy';
 import { initialStructure, isInhibitorAlive, reviveStructures } from './rift/structures';
 import { initialWaveSchedule, scheduleDueWaves } from './rift/waveSchedule';
 import { admitDueMinions, advanceMinions } from './rift/minionBodies';
+import { pruneTargets, resolveMinionCombat } from './rift/minionCombat';
 
 /**
  * Population cap per side and lane, and how long a deferred spawn waits.
@@ -108,6 +109,7 @@ export function createChampsSimulation(
       // needing structure combat in this harness, which BattleScene still owns.
       waves: initialWaveSchedule(),
       minions: [],
+      targets: {},
       structures: {
         allyInhibitor: initialStructure(2000),
         enemyInhibitor: initialStructure(2000),
@@ -185,6 +187,22 @@ export function createChampsSimulation(
       const admitted = admitDueMinions(next.minions, next.waves, next.simTime, MAX_LIVE_PER_LANE, RETRY_SECONDS);
       next.minions = advanceMinions(admitted.minions, TICK_SECONDS);
       next.waves = admitted.waves;
+
+      // Combat AFTER movement, so a minion that walked into range this tick may swing on it rather than waiting one.
+      const combat = resolveMinionCombat(next.minions, next.units, next.targets, TICK_SECONDS);
+      next.minions = combat.minions;
+      next.targets = combat.targets;
+      for (const hit of combat.damage) {
+        const victim = next.units.find((unit) => unit.id === hit.targetId);
+        if (!victim || victim.dead) continue;
+        victim.hp = Math.max(0, victim.hp - hit.amount);
+        if (victim.hp === 0) victim.dead = true;
+      }
+      // Prune AFTER the hits land, or a target that died this tick would lose its damage.
+      next.targets = pruneTargets(
+        next.targets,
+        new Set([...next.units.map((unit) => unit.id), ...next.minions.map((minion) => minion.id)]),
+      );
 
       // Resolve what has landed. Damage is computed from the SOURCE as it was at cast time,
       // which is why the queue copies the shooter rather than referencing it - a shooter that

@@ -9,6 +9,7 @@ import { advanceGold, type GoldState } from './rift/economy';
 import type { StructureState } from './rift/structures';
 import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import { cloneMinions, type MinionState } from './rift/minionBodies';
+import type { TargetTable } from './rift/minionCombat';
 import {
   advanceAttackCooldown,
   distance,
@@ -264,10 +265,20 @@ export interface WorldState {
    * restored champions into a world holding whatever minions the scene happened to have is a rollback that disagrees
    * about the population of the map.
    *
-   * Movement and admission only: minion COMBAT — targeting and basic attacks — is still in BattleScene, so this does
-   * not yet make a whole match rewindable. Said here rather than left for a reader to discover.
+   * Movement, admission AND combat. What is still scene-only is champion basic-attack passives, which live in three
+   * further Maps (passiveCounters, internalCooldowns, sunfireHitAt) and are a separate slice.
    */
   minions: MinionState[];
+  /**
+   * Which unit each attacker is locked on to.
+   *
+   * A real hole, not a new feature. The scene keeps this as a Map so a unit stays locked on rather than re-acquiring
+   * every tick — which is BEHAVIOUR: a unit that re-picked the nearest enemy each tick would flick between two
+   * equidistant targets and land its damage on neither. Being a Map it could never be snapshotted, so a rollback
+   * restored positions and health but not who was shooting whom, and two peers could share every position while
+   * disagreeing about that.
+   */
+  targets: TargetTable;
 }
 
 /**
@@ -311,6 +322,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     ),
     waves: cloneWaveSchedule(state.waves),
     minions: cloneMinions(state.minions),
+    targets: { ...state.targets },
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

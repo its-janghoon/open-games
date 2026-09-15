@@ -184,6 +184,7 @@ describe('cloneWorldState', () => {
     nextInsertionOrder: 4,
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
     structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
+    targets: { a: null },
     minions: [
       {
         id: 'm8-ally-mid',
@@ -197,6 +198,7 @@ describe('cloneWorldState', () => {
         maxHp: 60,
         dead: false,
         atEnd: false,
+        attackCdRemaining: 0,
       },
     ],
     waves: {
@@ -245,6 +247,10 @@ describe('cloneWorldState', () => {
     // shared reference is harmless TODAY. This function promises independence regardless.
     // Minions for the same reason as economy and waves: advanceMinions returns a new array, so sharing is harmless
     // TODAY. This function promises independence regardless, and pos is an object a shallow copy would share.
+    // targets for the fourth time in this branch: every record step REPLACES rather than mutates, so sharing is
+    // harmless today and only today. Asserting it here is what turns that from a habit into a contract.
+    copy.targets.a = 'someone-else';
+    copy.targets.zz = 'x';
     copy.minions[0].hp = 1;
     copy.minions[0].pos.x = -999;
     copy.minions.push({ ...copy.minions[0], id: 'extra' });
@@ -265,6 +271,8 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.targets.a).toBeNull();
+    expect(original.targets.zz).toBeUndefined();
     expect(original.minions).toHaveLength(1);
     expect(original.minions[0].hp).toBe(60);
     expect(original.minions[0].pos.x).toBe(12);
@@ -346,6 +354,7 @@ describe('advanceLives', () => {
     lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    targets: {},
     minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},
@@ -428,6 +437,7 @@ describe('advanceEffects', () => {
     lives: { a: createChampionLifeState() },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    targets: {},
     minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},

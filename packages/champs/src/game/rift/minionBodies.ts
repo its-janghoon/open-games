@@ -26,6 +26,8 @@ export interface MinionState extends Minion {
   dead: boolean;
   /** True once the minion has walked its whole lane path. */
   atEnd: boolean;
+  /** Seconds until this minion may swing again. Absolute-free: it only ever counts down by dt within a tick. */
+  attackCdRemaining: number;
 }
 
 /** The id a queued spawn will become. Deterministic, so a replay reproduces it exactly. */
@@ -44,6 +46,7 @@ export function minionFromSpawn(spawn: PendingWaveSpawn): MinionState {
     maxHp: stats.hp,
     dead: false,
     atEnd: false,
+    attackCdRemaining: 0,
   };
 }
 
