@@ -12,6 +12,12 @@ import { cloneMinions, type MinionState } from './rift/minionBodies';
 import type { TargetTable } from './rift/minionCombat';
 import { clonePassiveState, type PassiveState } from './rift/passives';
 import {
+  cloneTeamFacts,
+  type MatchOutcome,
+  type RecallTable,
+  type TeamFactsTable,
+} from './rift/matchFlow';
+import {
   advanceAttackCooldown,
   distance,
   partitionImpacts,
@@ -294,6 +300,17 @@ export interface WorldState {
    * an ability-side stack counter — because those are read by abilities and damage-taken paths rather than by a swing.
    */
   passives: PassiveState;
+  /** Recall channels, keyed by participant. Absolute start times — see the RecallTable note. */
+  recalls: RecallTable;
+  /** What a result is scored from. Read by the resolution check, so two peers must agree on it. */
+  teamFacts: TeamFactsTable;
+  /**
+   * Whether the match is decided.
+   *
+   * The step READS it to stop advancing, so it is snapshot state for the same reason Gridfall's outcome is. Ringout's
+   * round tally is the opposite case and sits outside its state, because nothing in that simulation reads it.
+   */
+  outcome: MatchOutcome;
 }
 
 /**
@@ -339,6 +356,12 @@ export function cloneWorldState(state: WorldState): WorldState {
     minions: cloneMinions(state.minions),
     targets: { ...state.targets },
     passives: clonePassiveState(state.passives),
+    recalls: { ...state.recalls },
+    teamFacts: cloneTeamFacts(state.teamFacts),
+    // Spread rather than shared: the union's payload is strings today, and sharing would leak a rewritten winner back
+    // into a snapshot the rollback still needs. Asserted in the clone contract in this same commit, which is the rule
+    // the previous five record fields each had to learn by injection.
+    outcome: { ...state.outcome },
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

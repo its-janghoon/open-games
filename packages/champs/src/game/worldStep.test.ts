@@ -185,6 +185,9 @@ describe('cloneWorldState', () => {
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
     structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
     passives: { counters: {}, deadlines: {} },
+    recalls: { a: null },
+    teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+    outcome: { kind: 'ongoing' },
     targets: { a: null },
     minions: [
       {
@@ -252,6 +255,9 @@ describe('cloneWorldState', () => {
     // harmless today and only today. Asserting it here is what turns that from a habit into a contract.
     // passives: the FIFTH field to slip through this way. The pattern is now established well enough that a new
     // record field should be asserted here in the same commit that adds it, rather than after an injection finds it.
+    copy.recalls.a = 12345;
+    copy.teamFacts.ally.championKills = 99;
+    (copy.outcome as { kind: string }).kind = 'decided';
     copy.passives.counters.k = 999;
     copy.passives.deadlines.d = 999;
     copy.targets.a = 'someone-else';
@@ -276,6 +282,9 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.recalls.a).toBeNull();
+    expect(original.teamFacts.ally.championKills).toBe(0);
+    expect(original.outcome.kind).toBe('ongoing');
     expect(original.passives.counters.k).toBeUndefined();
     expect(original.passives.deadlines.d).toBeUndefined();
     expect(original.targets.a).toBeNull();
@@ -362,6 +371,9 @@ describe('advanceLives', () => {
     pendingImpacts: [],
     nextInsertionOrder: 0,
     passives: { counters: {}, deadlines: {} },
+    recalls: {},
+    teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+    outcome: { kind: 'ongoing' },
     targets: {},
     minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
@@ -446,6 +458,9 @@ describe('advanceEffects', () => {
     pendingImpacts: [],
     nextInsertionOrder: 0,
     passives: { counters: {}, deadlines: {} },
+    recalls: {},
+    teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+    outcome: { kind: 'ongoing' },
     targets: {},
     minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },

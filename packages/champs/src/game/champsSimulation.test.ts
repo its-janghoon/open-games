@@ -261,6 +261,9 @@ describe('champs world under rollback', () => {
         pendingImpacts: [],
         nextInsertionOrder: 0,
         passives: { counters: {}, deadlines: {} },
+        recalls: {},
+        teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+        outcome: { kind: 'ongoing' },
         targets: {},
         minions: [],
         waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
@@ -522,6 +525,27 @@ describe('champs world under rollback', () => {
     expect(expected.waves.spawnedWaves, 'the window must cross the first wave').toBeGreaterThan(0);
     expect(expected.minions.length, 'and the scheduled wave must become bodies').toBeGreaterThan(0);
     expect(session.peek().minions).toEqual(expected.minions);
+  });
+
+  it('freezes a decided match, so nothing advances past the end', () => {
+    /**
+     * Same rule as Gridfall's. Without it a queued impact still lands after the winning blow and timers keep firing, so
+     * the state two peers must agree on carries on changing past the end of the match — and a peer that resumed from a
+     * later snapshot would see a different post-match world.
+     */
+    const sim = createChampsSimulation(PARTICIPANTS);
+    const decided: WorldState = {
+      ...sim.initial(),
+      outcome: { kind: 'decided', winner: 'ally', reason: 'nexus-destroyed' },
+    };
+    const before = JSON.parse(JSON.stringify(decided)) as WorldState;
+    const after = sim.step(decided, new Map([['p1', { moveTo: { x: 400, y: 400 }, cast: true }]]), 1);
+    expect(after.units).toEqual(before.units);
+    expect(after.simTime).toBe(before.simTime);
+    expect(after.pendingImpacts).toEqual(before.pendingImpacts);
+    expect(after.economy).toEqual(before.economy);
+    // Only the tick label moves, so a caller's clock still advances.
+    expect(after.tick).toBe(1);
   });
 
   it('refuses an input older than the rollback window instead of applying it to the wrong base', () => {

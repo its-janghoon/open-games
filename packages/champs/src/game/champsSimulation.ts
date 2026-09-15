@@ -9,6 +9,12 @@ import { initialWaveSchedule, scheduleDueWaves } from './rift/waveSchedule';
 import { admitDueMinions, advanceMinions } from './rift/minionBodies';
 import { pruneTargets, resolveMinionCombat } from './rift/minionCombat';
 import { basicAttackBonus, createPassiveState, prunePassives } from './rift/passives';
+import {
+  advanceRecalls,
+  createTeamFacts,
+  isDecided,
+  ongoing,
+} from './rift/matchFlow';
 
 /**
  * Population cap per side and lane, and how long a deferred spawn waits.
@@ -112,6 +118,9 @@ export function createChampsSimulation(
       minions: [],
       targets: {},
       passives: createPassiveState(),
+      recalls: Object.fromEntries(participants.map((id) => [id, null])),
+      teamFacts: createTeamFacts(),
+      outcome: ongoing(),
       structures: {
         allyInhibitor: initialStructure(2000),
         enemyInhibitor: initialStructure(2000),
@@ -138,6 +147,13 @@ export function createChampsSimulation(
     step(state, inputs, tick): WorldState {
       const next = cloneWorldState(state);
       next.tick = tick;
+      /**
+       * A decided match is frozen, checked FIRST so nothing else in the tick can run.
+       *
+       * Same rule as Gridfall's: without it a queued impact still lands after the winning blow and timers keep firing,
+       * so the state two peers must agree on carries on changing past the end of the match.
+       */
+      if (isDecided(next.outcome)) return next;
 
       for (const [id, input] of inputs) {
         if (input.moveTo) next.moveGoals[id] = { ...input.moveTo };
@@ -216,6 +232,15 @@ export function createChampsSimulation(
         if (victim.hp === 0) victim.dead = true;
       }
       // Prune AFTER the hits land, or a target that died this tick would lose its damage.
+      // Recalls resolve against the clock AFTER it has advanced, so a channel that completes on this tick completes
+      // before anything reads a position.
+      const recalled = advanceRecalls(next.recalls, next.simTime);
+      next.recalls = recalled.recalls;
+      for (const id of recalled.completed) {
+        const unit = next.units.find((candidate) => candidate.id === id);
+        // Base position by team, which is the whole point of a recall.
+        if (unit) unit.pos = unit.team === 'ally' ? { x: 60, y: 300 } : { x: 540, y: 300 };
+      }
       next.passives = prunePassives(next.passives, next.simTime);
       next.targets = pruneTargets(
         next.targets,
