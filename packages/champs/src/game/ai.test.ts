@@ -287,3 +287,65 @@ describe('contextual action scoring', () => {
     );
   });
 });
+describe('determinism — the property the whole rollback rests on', () => {
+  /**
+   * The bot AI is structurally pure: no Math.random, no clock, no module-level mutable state. Nothing asserted it, and
+   * a property nothing asserts is a property the next edit can remove for free.
+   *
+   * This matters more than most tests here. If two peers' bots decided differently from identical snapshots, every other
+   * piece of extracted state would be correct and the match would still diverge — and the divergence would look like a
+   * netcode bug rather than an AI one.
+   */
+  const VARIED: Partial<AiSnapshot>[] = [
+    {},
+    { hasTarget: false },
+    { selfHpPct: 0.1 },
+    { selfHpPct: 0.5, distanceToTarget: 200 },
+    { selfResourcePct: 0, distanceToTarget: 100 },
+    { targetLowHp: true, distanceToTarget: 120 },
+    { distanceToTarget: 900 },
+    { selfHpPct: RETREAT_HP_THRESHOLD - 0.01 },
+    { selfHpPct: SELF_SUSTAIN_HP_THRESHOLD - 0.01, distanceToTarget: 300 },
+  ];
+
+  it('returns the same intent for the same snapshot, every time', () => {
+    for (const overrides of VARIED) {
+      const snapshot = makeSnapshot(overrides);
+      const first = decideAction(snapshot);
+      for (let i = 0; i < 20; i += 1) {
+        expect(decideAction(makeSnapshot(overrides)), JSON.stringify(overrides)).toBe(first);
+      }
+    }
+  });
+
+  it('is the same for the scored path too', () => {
+    for (const overrides of VARIED) {
+      const first = decideScoredAction(makeSnapshot(overrides));
+      expect(decideScoredAction(makeSnapshot(overrides))).toBe(first);
+      expect(decideScoredAction(makeSnapshot(overrides))).toBe(first);
+    }
+  });
+
+  it('does not depend on the order snapshots are evaluated in', () => {
+    // A module-level accumulator would show up here and nowhere else: forward and reverse passes would disagree.
+    const forward = VARIED.map((o) => decideAction(makeSnapshot(o)));
+    const reverse = [...VARIED].reverse().map((o) => decideAction(makeSnapshot(o)));
+    expect(reverse).toEqual([...forward].reverse());
+  });
+
+  it('does not mutate the snapshot it was given', () => {
+    // A decision that wrote back into its input would make the SECOND call on a replayed tick different from the first.
+    const snapshot = makeSnapshot({ selfHpPct: 0.4, distanceToTarget: 250 });
+    const before = JSON.stringify(snapshot);
+    decideAction(snapshot);
+    decideScoredAction(snapshot);
+    expect(JSON.stringify(snapshot)).toBe(before);
+  });
+
+  it('scores every intent identically on repeated calls', () => {
+    const snapshot = makeSnapshot({ selfHpPct: 0.6, distanceToTarget: 300 });
+    for (const intent of ['approach', 'retreat', 'attack'] as const) {
+      expect(scoreAiIntent(snapshot, intent)).toBe(scoreAiIntent(snapshot, intent));
+    }
+  });
+});

@@ -278,6 +278,7 @@ describe('champs world under rollback', () => {
         recalls: {},
         teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
         outcome: { kind: 'ongoing' },
+        resources: {},
         autoAttackers: [],
         targets: {},
         minions: [],

@@ -10,6 +10,7 @@ import { admitDueMinions, advanceMinions } from './rift/minionBodies';
 import { pruneTargets, resolveMinionCombat } from './rift/minionCombat';
 import { basicAttackBonus, createPassiveState, prunePassives } from './rift/passives';
 import { resolveAutoAttacks } from './rift/autoAttack';
+import { advanceResources, initialResource } from './rift/resources';
 import {
   advanceRecalls,
   createTeamFacts,
@@ -139,6 +140,7 @@ export function createChampsSimulation(
       teamFacts: createTeamFacts(),
       outcome: ongoing(),
       // One turret per side, so the step is genuinely exercised without needing the scene's full structure graph.
+      resources: Object.fromEntries(participants.map((id) => [id, initialResource(300)])),
       autoAttackers: [
         { id: 'allyTurret', team: 'ally', pos: { x: 160, y: 300 }, ad: 90, attackRange: 200, attackCdRemaining: 0, stunned: 0, dead: false },
         { id: 'enemyTurret', team: 'enemy', pos: { x: 440, y: 300 }, ad: 90, attackRange: 200, attackCdRemaining: 0, stunned: 0, dead: false },
@@ -224,6 +226,7 @@ export function createChampsSimulation(
       // rollback has to restore, so a step that only touched gold on the tick it crossed a whole number would leave
       // the carry outside the snapshot's reach again.
       next.economy = advanceEconomy(next.economy, TICK_SECONDS);
+      next.resources = advanceResources(next.resources, TICK_SECONDS);
       // Revive runs against the clock AFTER it has advanced, so a structure whose respawn time falls on this tick is
       // back before anything reads it. The deadline is absolute, so a replayed tick reaches the same verdict.
       next.structures = reviveStructures(next.structures, next.simTime);

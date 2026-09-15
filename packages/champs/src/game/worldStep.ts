@@ -12,6 +12,7 @@ import { cloneMinions, type MinionState } from './rift/minionBodies';
 import type { TargetTable } from './rift/minionCombat';
 import { clonePassiveState, type PassiveState } from './rift/passives';
 import { cloneAutoAttackers, type AutoAttacker } from './rift/autoAttack';
+import { cloneResources, type ResourceState } from './rift/resources';
 import {
   cloneTeamFacts,
   type MatchOutcome,
@@ -320,6 +321,14 @@ export interface WorldState {
    * position and health while its next shot landed on whatever frame the scene happened to be on.
    */
   autoAttackers: AutoAttacker[];
+  /**
+   * Ability resource per participant.
+   *
+   * Behavioural, not cosmetic: resource gates whether an ability can be cast, so two peers holding different amounts make
+   * different decisions from the same inputs. The bot AI was never the determinism problem — it is already a pure
+   * function of a snapshot — but the state it READS was.
+   */
+  resources: Record<string, ResourceState>;
 }
 
 /**
@@ -372,6 +381,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     // the previous five record fields each had to learn by injection.
     outcome: { ...state.outcome },
     autoAttackers: cloneAutoAttackers(state.autoAttackers),
+    resources: cloneResources(state.resources),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

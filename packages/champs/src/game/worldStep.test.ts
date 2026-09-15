@@ -188,6 +188,7 @@ describe('cloneWorldState', () => {
     recalls: { a: null },
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
+    resources: { a: { current: 300, max: 300 } },
     autoAttackers: [
       {
         id: 't1',
@@ -268,6 +269,8 @@ describe('cloneWorldState', () => {
     // passives: the FIFTH field to slip through this way. The pattern is now established well enough that a new
     // record field should be asserted here in the same commit that adds it, rather than after an injection finds it.
     // autoAttackers asserted in the SAME commit that adds it, which is now the standing rule for a new record field.
+    copy.resources.a.current = 1;
+    copy.resources.zz = { current: 5, max: 5 };
     copy.autoAttackers[0].attackCdRemaining = 99;
     copy.autoAttackers[0].pos.x = -999;
     copy.autoAttackers.push({ ...copy.autoAttackers[0], id: 'extra' });
@@ -298,6 +301,8 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.resources.a.current).toBe(300);
+    expect(original.resources.zz).toBeUndefined();
     expect(original.autoAttackers).toHaveLength(1);
     expect(original.autoAttackers[0].attackCdRemaining).toBe(0);
     expect(original.autoAttackers[0].pos.x).toBe(300);
@@ -393,6 +398,7 @@ describe('advanceLives', () => {
     recalls: {},
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
+    resources: {},
     autoAttackers: [],
     targets: {},
     minions: [],
@@ -481,6 +487,7 @@ describe('advanceEffects', () => {
     recalls: {},
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
+    resources: {},
     autoAttackers: [],
     targets: {},
     minions: [],
