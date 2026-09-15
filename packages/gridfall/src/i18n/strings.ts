@@ -134,3 +134,34 @@ export function resolveLanguage(tag?: string): Language {
       : '');
   return resolved.toLowerCase().startsWith('en') ? 'en' : 'ko';
 }
+
+/**
+ * The connect panel's copy, gathered for the shared panel.
+ *
+ * The panel lives in @open-games/shared because both games need it, so it carries no locale of its own and is handed
+ * a plain record instead. This function is the seam: the strings stay in this game's table, where the locale tests
+ * already check that both languages exist and that placeholders match.
+ */
+export function connectPanelText(language: Language) {
+  return {
+    title: tr('net.connectTitle', language),
+    blurb: tr('net.connectBlurb', language),
+    host: tr('net.hostButton', language),
+    join: tr('net.joinButton', language),
+    close: tr('net.closeButton', language),
+    yourCode: tr('net.yourCode', language),
+    theirCode: tr('net.theirCode', language),
+    submit: tr('net.submitCode', language),
+    gathering: tr('net.gathering', language),
+    shareYourCode: tr('net.shareYourCode', language),
+    pasteOffer: tr('net.pasteOffer', language),
+    pasteAnswer: tr('net.pasteAnswer', language),
+    sendBackYourCode: tr('net.sendBackYourCode', language),
+    finishing: tr('net.finishing', language),
+    needCode: tr('net.needCode', language),
+    unavailable: tr('net.unavailable', language),
+    connected: tr('net.connected', language, { role: '{role}' }),
+    roleHost: tr('net.roleHost', language),
+    roleGuest: tr('net.roleGuest', language),
+  };
+}

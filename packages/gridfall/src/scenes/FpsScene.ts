@@ -19,7 +19,8 @@ import { FONT_STACK } from '../config/fontStack';
 import { CueSynth } from '@open-games/shared';
 import type { PeerLink } from '@open-games/shared';
 import { createAnswer, createOffer, type RtcOptions } from '@open-games/shared';
-import { createConnectPanel, type ConnectPanel } from '../net/connectPanel';
+import { createConnectPanel, type ConnectPanel } from '@open-games/shared';
+import { connectPanelText } from '../i18n/strings';
 
 /**
  * The first-person view, drawn from geometry alone.
@@ -265,8 +266,8 @@ export class FpsScene extends Phaser.Scene {
   private openConnectPanel(): void {
     if (this.net) return; // Already in a networked match; a second link would fight the first.
     if (!this.connectPanel) {
-      this.connectPanel = createConnectPanel({
-        language: this.language,
+      this.connectPanel = createConnectPanel<FpsInput>({
+        text: connectPanelText(this.language),
         onConnected: (link, participant) => {
           this.role = participant;
           this.startNetworked(link, participant);

@@ -15,7 +15,7 @@ import {
   ringEdges,
   TORSO_WIDTH,
 } from '../config/View';
-import { createFightSimulation } from '../game/fightSimulation';
+import { createFightSimulation, hashFightState } from '../game/fightSimulation';
 import {
   hitBox,
   NEUTRAL_INPUT,
@@ -26,9 +26,18 @@ import {
 } from '../game/fightState';
 import { poseFor, segments, type Pose } from '../game/pose';
 import { EMPTY_TALLY, recordRound, type Tally } from '../game/tally';
-import { tr, type Language, type TrKey } from '../i18n/strings';
+import { connectPanelText, tr, type Language, type TrKey } from '../i18n/strings';
 import { FONT_STACK } from '../config/fontStack';
-import { CueSynth } from '@open-games/shared';
+import {
+  createAnswer,
+  createConnectPanel,
+  createOffer,
+  CueSynth,
+  NetSession,
+  type RtcOptions,
+  type ConnectPanel,
+  type PeerLink,
+} from '@open-games/shared';
 
 /**
  * The fight, drawn from geometry alone.
@@ -45,6 +54,19 @@ import { CueSynth } from '@open-games/shared';
  */
 export class FightScene extends Phaser.Scene {
   private session!: RollbackSession<FightState, FightInput>;
+  /**
+   * The networked driver, when a real connection is up.
+   *
+   * Ringout shipped with NO transport at all while its catalogue summary promised two people on the same network could
+   * fight with no server between them. That was simply false. Mutually exclusive with `session`: exactly one of the two
+   * drives the fight, so the world can never be advanced twice per tick.
+   */
+  private net?: NetSession<FightState, FightInput>;
+  /** Which fighter this machine controls. 'p1' locally, and whichever the handshake gave us over the network. */
+  private role: 'p1' | 'p2' = 'p1';
+  private connectPanel?: ConnectPanel;
+  private netStatus!: Phaser.GameObjects.Text;
+  private desyncAt: number | null = null;
   private graphics!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Graphics;
   private banner!: Phaser.GameObjects.Text;
@@ -112,6 +134,15 @@ export class FightScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setVisible(false);
 
+    this.netStatus = this.add
+      .text(GAME_WIDTH - 16, 16, '', {
+        fontFamily: FONT_STACK,
+        fontSize: '12px',
+        color: '#8ea0c8',
+      })
+      .setOrigin(1, 0)
+      .setScrollFactor(0);
+
     this.hint = this.add
       .text(GAME_WIDTH / 2, 200, tr('result.rematch', this.language), {
         fontFamily: FONT_STACK,
@@ -150,6 +181,7 @@ export class FightScene extends Phaser.Scene {
       p2Jab: K.J,
       p2Kick: K.K,
       p2Slam: K.L,
+      openNetwork: K.N,
     }) as Record<string, Phaser.Input.Keyboard.Key>;
 
     // Exposed for the browser probe, the way the other games expose their state. Read-only from
@@ -164,7 +196,15 @@ export class FightScene extends Phaser.Scene {
         const state = this.session.peek();
         return poseFor(state.fighters[index], state.tick);
       },
-      tick: () => this.session.stats().tick,
+      tick: () => (this.net ? this.net.tick : this.session.stats().tick),
+      networked: () => this.net !== undefined,
+      role: () => this.role,
+      /** The real transport, exposed for verification only — Node has no RTCPeerConnection. */
+      rtc: {
+        createOffer: (opts?: RtcOptions) => createOffer<FightInput>(opts),
+        createAnswer: (code: string, opts?: RtcOptions) => createAnswer<FightInput>(code, opts),
+        iceServersUsed: () => [] as string[],
+      },
       /**
        * Hide the interface, keeping the world.
        *
@@ -207,17 +247,66 @@ export class FightScene extends Phaser.Scene {
     };
   }
 
+  /** The fight, from whichever driver is active. */
+  private fight(): FightState {
+    return this.net ? this.net.peek() : this.session.peek();
+  }
+
+  /**
+   * Start a networked fight on a real link.
+   *
+   * Identical in shape to Gridfall's, which is the payoff of the netcode never having held a socket: the checksum is
+   * reported and never repaired, because repair means shipping world state and handing one side authority over the
+   * other.
+   */
+  private startNetworked(link: PeerLink<FightInput>, role: 'p1' | 'p2'): void {
+    if (this.net) return;
+    this.role = role;
+    this.net = new NetSession<FightState, FightInput>({
+      sim: createFightSimulation(['p1', 'p2']),
+      participants: ['p1', 'p2'],
+      localParticipant: role,
+      link,
+      hashState: hashFightState,
+      checksumInterval: 60,
+      maxRollbackTicks: 240,
+      onDesync: (report) => {
+        this.desyncAt = report.tick;
+      },
+    });
+  }
+
+  private openConnectPanel(): void {
+    if (this.net) return;
+    if (!this.connectPanel) {
+      this.connectPanel = createConnectPanel<FightInput>({
+        text: connectPanelText(this.language),
+        onConnected: (link, participant) => this.startNetworked(link, participant),
+      });
+    }
+    this.connectPanel.open();
+  }
+
   update(_time: number, deltaMs: number): void {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.openNetwork)) this.openConnectPanel();
     // Clamped so a tab that was backgrounded for a minute does not try to simulate a minute of fight
     // in one frame and freeze the page. Dropping that time is the honest trade: the alternative is a
     // hang, and nobody was watching anyway.
     this.carry += Math.min(deltaMs / 1000, 0.25);
     while (this.carry >= TICK_SECONDS) {
       this.carry -= TICK_SECONDS;
-      const at = this.session.stats().tick;
-      this.session.setLocalInput('p1', this.readInput('p1'));
-      this.session.setLocalInput('p2', this.readInput('p2'));
-      this.session.advanceTo(at + 1);
+      if (this.net) {
+        // Networked: send only OUR input, read from the PRIMARY keys whatever role we hold. The p2 bindings exist so
+        // two people can share one keyboard without their hands colliding; over the network each player is alone, so
+        // binding the guest to the second set would hand them the awkward half for no reason. Gridfall shipped that
+        // bug and it was only visible with two real browser windows.
+        this.net.advance(this.readInput('p1'));
+      } else {
+        const at = this.session.stats().tick;
+        this.session.setLocalInput('p1', this.readInput('p1'));
+        this.session.setLocalInput('p2', this.readInput('p2'));
+        this.session.advanceTo(at + 1);
+      }
     }
     this.draw();
   }
@@ -251,7 +340,23 @@ export class FightScene extends Phaser.Scene {
   }
 
   private draw(): void {
-    const state = this.session.peek();
+    const state = this.fight();
+    /**
+     * Show the networked state, or nothing at all when playing locally.
+     *
+     * A desync is REPORTED and never repaired — repair would mean shipping world state and handing one side authority
+     * over the other, which abandons input-only netcode. Showing it turns a silent disagreement into something a
+     * player can see and restart out of.
+     */
+    this.netStatus.setText(
+      this.net === undefined
+        ? ''
+        : this.desyncAt !== null
+          ? tr('net.desync', this.language, { tick: this.desyncAt })
+          : tr('net.connected', this.language, {
+              role: tr(this.role === 'p1' ? 'net.roleHost' : 'net.roleGuest', this.language),
+            }),
+    );
     this.emitCues(state);
     const g = this.graphics;
     g.clear();

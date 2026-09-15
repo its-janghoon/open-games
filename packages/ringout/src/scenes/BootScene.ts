@@ -50,6 +50,7 @@ export class BootScene extends Phaser.Scene {
       tr('title.controlsP1', language),
       tr('title.controlsP2', language),
       tr('title.controlsHint', language),
+      tr('title.network', language),
     ].join('\n');
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 104, controls, {

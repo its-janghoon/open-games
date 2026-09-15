@@ -59,6 +59,42 @@ export const STRINGS = {
   // Player labels, so the banner never prints a bare participant id at a human.
   'player.p1': { en: 'Player 1', ko: '1P' },
   'player.p2': { en: 'Player 2', ko: '2P' },
+  'title.network': { en: 'Press N to play over your network', ko: 'N 키로 네트워크 플레이' },
+  'net.connectTitle': { en: 'Play over your network', ko: '네트워크로 플레이' },
+  'net.connectBlurb': {
+    en: 'No server and no account. One of you hosts, the other joins, and you pass two codes between you however you already talk. Both players must be on the SAME network.',
+    ko: '서버도 계정도 없습니다. 한 사람이 방을 열고 다른 사람이 참가해, 두 개의 코드를 서로 전달하면 됩니다. 두 사람이 반드시 같은 네트워크에 있어야 합니다.',
+  },
+  'net.hostButton': { en: 'Host a match', ko: '방 열기' },
+  'net.joinButton': { en: 'Join a match', ko: '참가하기' },
+  'net.closeButton': { en: 'Close', ko: '닫기' },
+  'net.yourCode': { en: 'Your code — send this to the other player', ko: '내 코드 — 상대에게 보내세요' },
+  'net.theirCode': { en: "The other player's code", ko: '상대의 코드' },
+  'net.submitCode': { en: 'Use this code', ko: '이 코드 사용' },
+  'net.gathering': { en: 'Preparing your code…', ko: '코드를 준비하는 중…' },
+  'net.shareYourCode': { en: 'Send your code, then paste the reply below.', ko: '내 코드를 보내고, 답장 코드를 아래에 붙여넣으세요.' },
+  'net.pasteOffer': { en: "Paste the host's code here.", ko: '방장의 코드를 여기에 붙여넣으세요.' },
+  'net.pasteAnswer': { en: "Paste the other player's reply here.", ko: '상대의 답장 코드를 여기에 붙여넣으세요.' },
+  'net.sendBackYourCode': { en: 'Send your code back to the host.', ko: '내 코드를 방장에게 보내세요.' },
+  'net.finishing': { en: 'Connecting…', ko: '연결하는 중…' },
+  'net.needCode': { en: 'Paste a code first.', ko: '먼저 코드를 붙여넣으세요.' },
+  'net.unavailable': {
+    en: 'This browser cannot make a direct connection. You can still play two players on one keyboard.',
+    ko: '이 브라우저는 직접 연결을 만들 수 없습니다. 한 키보드로 두 명이 플레이하는 것은 그대로 됩니다.',
+  },
+  /**
+   * A desync is shown, never repaired.
+   *
+   * Repair would mean shipping world state and handing one side authority over the other, which abandons input-only
+   * netcode entirely. Naming the tick turns a silent disagreement into something a player can see and act on.
+   */
+  'net.desync': {
+    en: 'The two fights disagreed at tick {tick} — restart to resync.',
+    ko: '틱 {tick}에서 두 시뮬레이션이 어긋났습니다 — 재시작하면 맞춰집니다.',
+  },
+  'net.roleHost': { en: 'player 1', ko: '1P' },
+  'net.roleGuest': { en: 'player 2', ko: '2P' },
+  'net.connected': { en: 'Connected — {role}', ko: '연결됨 — {role}' },
 } as const satisfies Record<string, TrEntry>;
 
 export type TrKey = keyof typeof STRINGS;
@@ -79,4 +115,28 @@ export function tr(
   return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
     name in params ? String(params[name]) : whole,
   );
+}
+
+export function connectPanelText(language: Language) {
+  return {
+    title: tr('net.connectTitle', language),
+    blurb: tr('net.connectBlurb', language),
+    host: tr('net.hostButton', language),
+    join: tr('net.joinButton', language),
+    close: tr('net.closeButton', language),
+    yourCode: tr('net.yourCode', language),
+    theirCode: tr('net.theirCode', language),
+    submit: tr('net.submitCode', language),
+    gathering: tr('net.gathering', language),
+    shareYourCode: tr('net.shareYourCode', language),
+    pasteOffer: tr('net.pasteOffer', language),
+    pasteAnswer: tr('net.pasteAnswer', language),
+    sendBackYourCode: tr('net.sendBackYourCode', language),
+    finishing: tr('net.finishing', language),
+    needCode: tr('net.needCode', language),
+    unavailable: tr('net.unavailable', language),
+    connected: tr('net.connected', language, { role: '{role}' }),
+    roleHost: tr('net.roleHost', language),
+    roleGuest: tr('net.roleGuest', language),
+  };
 }

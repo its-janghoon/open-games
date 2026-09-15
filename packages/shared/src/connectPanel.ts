@@ -1,14 +1,6 @@
-import {
-  createAnswer,
-  createOffer,
-  participantFor,
-  rtcAvailable,
-  type PeerLink,
-  type RtcTransport,
-} from '@open-games/shared';
-
-import type { FpsInput } from '../game/gridWorld';
-import { tr, type Language } from '../i18n/strings';
+import { createAnswer, createOffer, participantFor, rtcAvailable } from './rtcTransport';
+import type { PeerLink } from './netcode';
+import type { RtcTransport } from './rtcTransport';
 
 /**
  * The connect panel: a DOM overlay for exchanging connection codes.
@@ -22,12 +14,39 @@ import { tr, type Language } from '../i18n/strings';
  * a DOM accessibility mirror, which is what once made a focus chip appear in a screenshot.
  *
  * Nothing here touches the simulation. The panel's only output is a PeerLink and which participant this side plays.
+ *
+ * Generic over Input and given its COPY by the caller, because both games need it and neither should own it. The
+ * strings arrive as a plain record the game fills from its own table, so this file holds no locale and no game's
+ * vocabulary -- the alternative was 240 lines duplicated per game, drifting apart on the first fix.
  */
 
-export interface ConnectPanelOptions {
-  language: Language;
+/** Every string the panel shows. Supplied by the game so this module carries no locale of its own. */
+export interface ConnectPanelText {
+  title: string;
+  blurb: string;
+  host: string;
+  join: string;
+  close: string;
+  yourCode: string;
+  theirCode: string;
+  submit: string;
+  gathering: string;
+  shareYourCode: string;
+  pasteOffer: string;
+  pasteAnswer: string;
+  sendBackYourCode: string;
+  finishing: string;
+  needCode: string;
+  unavailable: string;
+  connected: string;
+  roleHost: string;
+  roleGuest: string;
+}
+
+export interface ConnectPanelOptions<Input> {
+  text: ConnectPanelText;
   /** Called once a channel is open, with the link and the participant this side plays. */
-  onConnected(link: PeerLink<FpsInput>, participant: 'p1' | 'p2'): void;
+  onConnected(link: PeerLink<Input>, participant: 'p1' | 'p2'): void;
 }
 
 export interface ConnectPanel {
@@ -53,8 +72,8 @@ const PANEL_BG = 'rgba(8, 11, 20, 0.94)';
 const ACCENT = '#69ffa8';
 const TEXT = '#dbe3ff';
 
-export function createConnectPanel(options: ConnectPanelOptions): ConnectPanel {
-  const { language } = options;
+export function createConnectPanel<Input>(options: ConnectPanelOptions<Input>): ConnectPanel {
+  const { text: copy } = options;
   let open = false;
 
   const root = el('div', {
@@ -79,24 +98,24 @@ export function createConnectPanel(options: ConnectPanelOptions): ConnectPanel {
     flexDirection: 'column',
     gap: '12px',
   });
-  const title = el('h2', { margin: '0', fontSize: '20px', color: ACCENT }, tr('net.connectTitle', language));
-  root.setAttribute('aria-label', tr('net.connectTitle', language));
+  const title = el('h2', { margin: '0', fontSize: '20px', color: ACCENT }, copy.title);
+  root.setAttribute('aria-label', copy.title);
   const blurb = el('p', { margin: '0', fontSize: '13px', lineHeight: '1.5', opacity: '0.85' },
-    tr('net.connectBlurb', language));
+    copy.blurb);
 
   const status = el('p', { margin: '0', fontSize: '13px', minHeight: '18px', color: ACCENT }, '');
   status.setAttribute('role', 'status');
 
-  const hostButton = el('button', buttonStyle(), tr('net.hostButton', language));
-  const joinButton = el('button', buttonStyle(), tr('net.joinButton', language));
-  const closeButton = el('button', buttonStyle(), tr('net.closeButton', language));
+  const hostButton = el('button', buttonStyle(), copy.host);
+  const joinButton = el('button', buttonStyle(), copy.join);
+  const closeButton = el('button', buttonStyle(), copy.close);
 
-  const mineLabel = el('label', { fontSize: '12px', opacity: '0.8' }, tr('net.yourCode', language));
+  const mineLabel = el('label', { fontSize: '12px', opacity: '0.8' }, copy.yourCode);
   const mine = el('textarea', textareaStyle());
   mine.readOnly = true;
-  const theirsLabel = el('label', { fontSize: '12px', opacity: '0.8' }, tr('net.theirCode', language));
+  const theirsLabel = el('label', { fontSize: '12px', opacity: '0.8' }, copy.theirCode);
   const theirs = el('textarea', textareaStyle());
-  const submit = el('button', buttonStyle(), tr('net.submitCode', language));
+  const submit = el('button', buttonStyle(), copy.submit);
 
   const exchange = el('div', { display: 'none', flexDirection: 'column', gap: '6px' });
   exchange.append(mineLabel, mine, theirsLabel, theirs, submit);
@@ -151,10 +170,10 @@ export function createConnectPanel(options: ConnectPanelOptions): ConnectPanel {
   let role: 'p1' | 'p2' = 'p1';
   let acceptAnswer: ((code: string) => Promise<void>) | null = null;
 
-  const wire = (t: RtcTransport<FpsInput>) => {
+  const wire = (t: RtcTransport<Input>) => {
     t.onLost((reason) => say(reason));
     void t.ready.then(() => {
-      say(tr('net.connected', language, { role: tr(role === 'p1' ? 'net.roleHost' : 'net.roleGuest', language) }));
+      say(copy.connected.replace('{role}', role === 'p1' ? copy.roleHost : copy.roleGuest));
       options.onConnected(t.link, role);
       // Left open for a moment so the player sees it connected, then dismissed on its own.
       window.setTimeout(() => panel.close(), 1200);
@@ -164,15 +183,15 @@ export function createConnectPanel(options: ConnectPanelOptions): ConnectPanel {
   hostButton.addEventListener('click', () => {
     hostButton.disabled = true;
     joinButton.disabled = true;
-    say(tr('net.gathering', language));
-    void createOffer<FpsInput>()
+    say(copy.gathering);
+    void createOffer<Input>()
       .then(async (offer) => {
         role = participantFor('offerer');
         mine.value = offer.code;
         acceptAnswer = offer.accept;
         exchange.style.display = 'flex';
-        theirsLabel.textContent = tr('net.pasteAnswer', language);
-        say(tr('net.shareYourCode', language));
+        theirsLabel.textContent = copy.pasteAnswer;
+        say(copy.shareYourCode);
         wire(offer.transport);
       })
       .catch(fail);
@@ -182,30 +201,30 @@ export function createConnectPanel(options: ConnectPanelOptions): ConnectPanel {
     hostButton.disabled = true;
     joinButton.disabled = true;
     exchange.style.display = 'flex';
-    mineLabel.textContent = tr('net.yourCode', language);
+    mineLabel.textContent = copy.yourCode;
     mine.value = '';
-    theirsLabel.textContent = tr('net.pasteOffer', language);
-    say(tr('net.pasteOffer', language));
+    theirsLabel.textContent = copy.pasteOffer;
+    say(copy.pasteOffer);
   });
 
   submit.addEventListener('click', () => {
     const code = theirs.value.trim();
     if (code === '') {
-      say(tr('net.needCode', language));
+      say(copy.needCode);
       return;
     }
     if (acceptAnswer) {
       // Hosting: this is the answer coming back.
-      void acceptAnswer(code).then(() => say(tr('net.finishing', language))).catch(fail);
+      void acceptAnswer(code).then(() => say(copy.finishing)).catch(fail);
       return;
     }
     // Joining: this is the offer, and answering it produces our own code to send back.
-    say(tr('net.gathering', language));
-    void createAnswer<FpsInput>(code)
+    say(copy.gathering);
+    void createAnswer<Input>(code)
       .then((answer) => {
         role = participantFor('answerer');
         mine.value = answer.code;
-        say(tr('net.sendBackYourCode', language));
+        say(copy.sendBackYourCode);
         wire(answer.transport);
       })
       .catch(fail);
@@ -220,7 +239,7 @@ export function createConnectPanel(options: ConnectPanelOptions): ConnectPanel {
     open() {
       if (!rtcAvailable()) {
         // Said plainly rather than presenting a connect flow that cannot work.
-        say(tr('net.unavailable', language));
+        say(copy.unavailable);
       }
       root.style.display = 'block';
       open = true;
