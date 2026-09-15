@@ -203,7 +203,21 @@ describe('champs world under rollback', () => {
     // nothing diverges. The idle reuse only happens when the ticks were ALREADY simulated while
     // p2 had no last-known input at all: those idle predictions are recorded as used, and the
     // replay reuses them rather than re-deriving better ones.
-    const session = new RollbackSession(createChampsSimulation(PARTICIPANTS), {
+    /**
+     * A world with NO turrets, because this test is about champion input prediction and turrets are noise for it.
+     *
+     * It counted `nextInsertionOrder` as a proxy for "how many casts happened", which works because that counter is
+     * cumulative — a landed impact leaves the queue, so counting pending impacts would undercount. Turrets firing on
+     * their own broke the proxy rather than the property, and scoping the impacts to champions did not fix it: by tick 20
+     * the champion's own impact has already landed. Removing the turrets keeps the counter meaning exactly what it meant.
+     */
+    const withoutTurrets = () => {
+      const sim = createChampsSimulation(PARTICIPANTS);
+      const base = sim.initial;
+      sim.initial = () => ({ ...base(), autoAttackers: [] });
+      return sim;
+    };
+    const session = new RollbackSession(withoutTurrets(), {
       participants: PARTICIPANTS,
       maxRollbackTicks: 120,
     });
@@ -218,7 +232,7 @@ describe('champs world under rollback', () => {
     expect(late.accepted).toBe(true);
     const withReusedPredictions = session.peek().nextInsertionOrder;
 
-    const sim = createChampsSimulation(PARTICIPANTS);
+    const sim = withoutTurrets();
     let persisted = sim.initial();
     for (let tick = 0; tick < 20; tick += 1) {
       persisted = sim.step(persisted, new Map(tick >= 5 ? [['p2', firing]] : []), tick);
@@ -264,6 +278,7 @@ describe('champs world under rollback', () => {
         recalls: {},
         teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
         outcome: { kind: 'ongoing' },
+        autoAttackers: [],
         targets: {},
         minions: [],
         waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },

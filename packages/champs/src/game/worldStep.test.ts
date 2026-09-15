@@ -188,6 +188,18 @@ describe('cloneWorldState', () => {
     recalls: { a: null },
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
+    autoAttackers: [
+      {
+        id: 't1',
+        team: 'ally',
+        pos: { x: 300, y: 200 },
+        ad: 90,
+        attackRange: 200,
+        attackCdRemaining: 0,
+        stunned: 0,
+        dead: false,
+      },
+    ],
     targets: { a: null },
     minions: [
       {
@@ -255,6 +267,10 @@ describe('cloneWorldState', () => {
     // harmless today and only today. Asserting it here is what turns that from a habit into a contract.
     // passives: the FIFTH field to slip through this way. The pattern is now established well enough that a new
     // record field should be asserted here in the same commit that adds it, rather than after an injection finds it.
+    // autoAttackers asserted in the SAME commit that adds it, which is now the standing rule for a new record field.
+    copy.autoAttackers[0].attackCdRemaining = 99;
+    copy.autoAttackers[0].pos.x = -999;
+    copy.autoAttackers.push({ ...copy.autoAttackers[0], id: 'extra' });
     copy.recalls.a = 12345;
     copy.teamFacts.ally.championKills = 99;
     (copy.outcome as { kind: string }).kind = 'decided';
@@ -282,6 +298,9 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.autoAttackers).toHaveLength(1);
+    expect(original.autoAttackers[0].attackCdRemaining).toBe(0);
+    expect(original.autoAttackers[0].pos.x).toBe(300);
     expect(original.recalls.a).toBeNull();
     expect(original.teamFacts.ally.championKills).toBe(0);
     expect(original.outcome.kind).toBe('ongoing');
@@ -374,6 +393,7 @@ describe('advanceLives', () => {
     recalls: {},
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
+    autoAttackers: [],
     targets: {},
     minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
@@ -461,6 +481,7 @@ describe('advanceEffects', () => {
     recalls: {},
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
+    autoAttackers: [],
     targets: {},
     minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },

@@ -11,6 +11,7 @@ import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import { cloneMinions, type MinionState } from './rift/minionBodies';
 import type { TargetTable } from './rift/minionCombat';
 import { clonePassiveState, type PassiveState } from './rift/passives';
+import { cloneAutoAttackers, type AutoAttacker } from './rift/autoAttack';
 import {
   cloneTeamFacts,
   type MatchOutcome,
@@ -311,6 +312,14 @@ export interface WorldState {
    * round tally is the opposite case and sits outside its state, because nothing in that simulation reads it.
    */
   outcome: MatchOutcome;
+  /**
+   * Turrets and objective monsters, as far as attacking is concerned.
+   *
+   * Their per-tick rule is one rule, not two — the scene's updateTurret and updateObjectiveMonsters differ only in range,
+   * damage, colour and a stun check. Their cooldowns and stuns were scene-side, so a rollback restored a turret's
+   * position and health while its next shot landed on whatever frame the scene happened to be on.
+   */
+  autoAttackers: AutoAttacker[];
 }
 
 /**
@@ -362,6 +371,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     // into a snapshot the rollback still needs. Asserted in the clone contract in this same commit, which is the rule
     // the previous five record fields each had to learn by injection.
     outcome: { ...state.outcome },
+    autoAttackers: cloneAutoAttackers(state.autoAttackers),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

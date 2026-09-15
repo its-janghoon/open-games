@@ -55,6 +55,7 @@ const world = (simTime = 0): WorldState => ({
   recalls: {},
   teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
   outcome: { kind: 'ongoing' },
+  autoAttackers: [],
   targets: {},
   minions: [],
   waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },

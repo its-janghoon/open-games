@@ -9,6 +9,7 @@ import { initialWaveSchedule, scheduleDueWaves } from './rift/waveSchedule';
 import { admitDueMinions, advanceMinions } from './rift/minionBodies';
 import { pruneTargets, resolveMinionCombat } from './rift/minionCombat';
 import { basicAttackBonus, createPassiveState, prunePassives } from './rift/passives';
+import { resolveAutoAttacks } from './rift/autoAttack';
 import {
   advanceRecalls,
   createTeamFacts,
@@ -23,6 +24,22 @@ import {
  * cannot be admitted is deferred rather than dropped, because dropping it would make the population depend on
  * processing order.
  */
+/**
+ * Projectile speed for auto-attackers, in this simulation's own units per second.
+ *
+ * NOT the scene's constant, and the reason is worth recording because I got here by two wrong turns. My first version
+ * invented 700, which is the mistake the previous commit warned about — a constant that changes while moving is a silent
+ * re-balance. So I went to copy the scene's `1650 * SCALE`, and that turned out to be worse: SCALE is computed from the
+ * VIEWPORT (`min(VIEW_W, VIEW_H) / WORLD_SIZE`), so the scene's speed is screen-space and depends on the window size.
+ * A pure simulation that imported it would make its own physics depend on how big the browser window is, which is the
+ * opposite of deterministic.
+ *
+ * So this is the simulation's own world-space value, declared as such rather than dressed up as the scene's. Matching
+ * the two is a separate job that belongs with converting the scene to world coordinates, and claiming they already match
+ * would be a false equivalence.
+ */
+const BASIC_PROJECTILE_SPEED = 700;
+
 const MAX_LIVE_PER_LANE = 12;
 const RETRY_SECONDS = 1;
 import { LANES } from './rift/map';
@@ -121,6 +138,11 @@ export function createChampsSimulation(
       recalls: Object.fromEntries(participants.map((id) => [id, null])),
       teamFacts: createTeamFacts(),
       outcome: ongoing(),
+      // One turret per side, so the step is genuinely exercised without needing the scene's full structure graph.
+      autoAttackers: [
+        { id: 'allyTurret', team: 'ally', pos: { x: 160, y: 300 }, ad: 90, attackRange: 200, attackCdRemaining: 0, stunned: 0, dead: false },
+        { id: 'enemyTurret', team: 'enemy', pos: { x: 440, y: 300 }, ad: 90, attackRange: 200, attackCdRemaining: 0, stunned: 0, dead: false },
+      ],
       structures: {
         allyInhibitor: initialStructure(2000),
         enemyInhibitor: initialStructure(2000),
@@ -240,6 +262,37 @@ export function createChampsSimulation(
         const unit = next.units.find((candidate) => candidate.id === id);
         // Base position by team, which is the whole point of a recall.
         if (unit) unit.pos = unit.team === 'ally' ? { x: 60, y: 300 } : { x: 540, y: 300 };
+      }
+      // Turrets and monsters fire AFTER champions and minions have moved, so a unit that walked into range is shot at
+      // on the tick it arrived rather than the next one.
+      const auto = resolveAutoAttacks(
+        next.autoAttackers,
+        next.units,
+        next.targets,
+        TICK_SECONDS,
+        BASIC_PROJECTILE_SPEED,
+      );
+      next.autoAttackers = auto.attackers;
+      next.targets = auto.targets;
+      for (const shot of auto.shots) {
+        const source = next.autoAttackers.find((a) => a.id === shot.sourceId);
+        const victim = next.units.find((unit) => unit.id === shot.targetId);
+        if (!source || !victim) continue;
+        // Through the EXISTING impact queue, so the flight is already rewindable and the counter stays monotonic in one
+        // place. dueAt is absolute, computed from the sim clock rather than carried as a remaining duration.
+        queueImpact(next, {
+          dueAt: next.simTime + shot.flightSeconds,
+          source: { ...victim, id: source.id, team: source.team, pos: { ...source.pos }, ad: source.ad },
+          targetId: shot.targetId,
+          radius: 0,
+          rawDamage: shot.rawDamage,
+          color: 0xffcc55,
+          stunDuration: 0,
+          ability: false,
+          ultimate: false,
+          singleTarget: true,
+          chronoProc: false,
+        });
       }
       next.passives = prunePassives(next.passives, next.simTime);
       next.targets = pruneTargets(
