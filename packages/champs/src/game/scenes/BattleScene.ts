@@ -205,6 +205,14 @@ import {
 } from '../rift/objectives';
 import type { EpicMonster } from '../rift/economy';
 import { attemptPurchase } from '../inventory';
+import {
+  addTravelled,
+  basicAttackBonus,
+  createPassiveState,
+  openDashWindow,
+  passiveKeys,
+  type PassiveState,
+} from '../rift/passives';
 import { scheduleDueWaves } from '../rift/waveSchedule';
 import {
   createLearningState,
@@ -607,7 +615,13 @@ export default class BattleScene extends Phaser.Scene {
   private entityById = new Map<string, Entity>();
   /** Last acquired target per acting entity; retained until it becomes invalid. */
   private targetByEntityId = new Map<string, string>();
-  private sunfireHitAt = new Map<string, number>();
+  /**
+   * Passive state, now one plain object rather than three Maps.
+   *
+   * The three it replaces could never be snapshotted; this shape can. The scene still owns it because BattleScene is
+   * the authority for a real match, but the RULES that read and write it live in rift/passives.ts.
+   */
+  private passives: PassiveState = createPassiveState();
   private passiveCounters = new Map<string, number>();
   private internalCooldowns = new Map<string, number>();
   /** Structure entities keyed by their pure graph id. */
@@ -764,9 +778,11 @@ export default class BattleScene extends Phaser.Scene {
     this.allEntities = [];
     this.entityById.clear();
     this.targetByEntityId.clear();
-    this.sunfireHitAt.clear();
+    // Two Maps remain, and they hold the passives NOT extracted: nightveil's smoke, aegis, ironhold, reflect and an
+    // ability-side stack counter. Only the basic-attack subset moved into PassiveState, so both are reset here.
     this.passiveCounters.clear();
     this.internalCooldowns.clear();
+    this.passives = createPassiveState();
     this.structureById.clear();
     this.structureLines = [];
     this.playerCds = createCooldownState();
@@ -2616,45 +2632,31 @@ export default class BattleScene extends Phaser.Scene {
     if (distance(u.pos, target.pos) > u.attackRange) return;
     const targetEntity = this.entityForUnit(target);
     if (!targetEntity || !this.isEntityDamageable(targetEntity)) return;
-    let ad = u.ad;
-    if (attacker.champion?.id === 'duskarrow') {
-      const key = `duskarrow-distance:${u.id}`;
-      if ((this.passiveCounters.get(key) ?? 0) >= 300) ad += 18;
-      this.passiveCounters.set(key, 0);
-    }
-    if (attacker.champion?.id === 'nightveil') {
-      const key = `nightveil-dash:${u.id}`;
-      if ((this.internalCooldowns.get(key) ?? 0) > this.elapsed) {
-        ad += 40;
-        this.internalCooldowns.set(key, 0);
-      }
-    }
-    if (attacker.champion?.id === 'ashborne') {
-      const key = `ashborne:${u.id}:${target.id}`;
-      const expiryKey = `${key}:expires`;
-      const prior = (this.internalCooldowns.get(expiryKey) ?? 0) > this.elapsed
-        ? this.passiveCounters.get(key) ?? 0 : 0;
-      const count = prior + 1;
-      this.internalCooldowns.set(expiryKey, this.elapsed + 4);
-      if (count >= 3) {
-        ad += 15;
-        this.passiveCounters.set(key, 0);
-      } else this.passiveCounters.set(key, count);
-    }
+    /**
+     * Passives resolved by the extracted pure step, not by mutating three Maps mid-attack.
+     *
+     * The scene keeps its own PassiveState so it remains the authority for a real match; what it no longer keeps is its
+     * own copy of the rules. Previously duskarrow, nightveil, ashborne, sunfire and the red buff each read and wrote
+     * `passiveCounters` / `internalCooldowns` / `sunfireHitAt` inline here, which is both why none of it could be
+     * rewound and why the bonus depended on the order attacks happened to resolve.
+     */
     const attackerItems = attacker === this.player ? this.ownedItems : attacker.bot?.ownedItems ?? [];
+    const attackerBuffs = attacker === this.player ? this.playerBuffs : attacker.bot?.buffs;
+    const resolved = basicAttackBonus(
+      {
+        championId: attacker.champion?.id ?? null,
+        attackerId: u.id,
+        targetId: target.id,
+        now: this.elapsed,
+        items: attackerItems,
+        hasRedBuff: attackerBuffs?.buffs.some((buff) => buff.kind === 'red') ?? false,
+      },
+      this.passives,
+    );
+    this.passives = resolved.state;
+    let ad = u.ad + resolved.bonusAd;
     if (attacker === this.player) {
       this.cancelRecall('attack');
-    }
-    if (
-      attackerItems.includes('sunfireGreatblade') &&
-      this.elapsed - (this.sunfireHitAt.get(`${u.id}:${target.id}`) ?? Number.NEGATIVE_INFINITY) >= 1
-    ) {
-      ad += 15;
-      this.sunfireHitAt.set(`${u.id}:${target.id}`, this.elapsed);
-    }
-    const attackerBuffs = attacker === this.player ? this.playerBuffs : attacker.bot?.buffs;
-    if (attackerBuffs?.buffs.some((buff) => buff.kind === 'red')) {
-      ad += BUFF_EFFECTS.red.bonusDamage;
     }
     if (attacker.champion) {
       this.setChampionPose(attacker, 'attack', CHAMPION_POSE_HOLD_MS.attack, 1);
@@ -2840,7 +2842,7 @@ export default class BattleScene extends Phaser.Scene {
     if (effect.dashes) {
       caster.unit.pos.x = endpoint.x;
       caster.unit.pos.y = endpoint.y;
-      if (champion.id === 'nightveil') this.internalCooldowns.set(`nightveil-dash:${caster.unit.id}`, this.elapsed + 3);
+      if (champion.id === 'nightveil') this.passives = openDashWindow(this.passives, caster.unit.id, this.elapsed + 3);
       this.drawDashTrail(origin, caster.unit.pos, color);
     }
     const alliesInRange = this.champions
@@ -3035,8 +3037,7 @@ export default class BattleScene extends Phaser.Scene {
     const champion = this.entityForUnit(u);
     if (champion === this.player && travel > 0) this.recordLearning('move');
     if (champion?.champion?.id === 'duskarrow' && travel > 0) {
-      const key = `duskarrow-distance:${u.id}`;
-      this.passiveCounters.set(key, (this.passiveCounters.get(key) ?? 0) + travel / SCALE);
+      this.passives = addTravelled(this.passives, u.id, travel / SCALE);
     }
     if (champion?.champion && travel > 0) champion.movedThisFrame = true;
   }
@@ -3528,7 +3529,12 @@ export default class BattleScene extends Phaser.Scene {
         ? this.playerProgress.level
         : targetEntity.bot?.progress.level ?? 1;
       targetEntity.life = killChampion(targetEntity.life, this.elapsed, level, this.mode);
-      if (targetEntity.champion?.id === 'duskarrow') this.passiveCounters.set(`duskarrow-distance:${target.id}`, 0);
+      if (targetEntity.champion?.id === 'duskarrow') {
+        this.passives = {
+          counters: { ...this.passives.counters, [passiveKeys.duskarrowDistance(target.id)]: 0 },
+          deadlines: { ...this.passives.deadlines },
+        };
+      }
       if (targetEntity === this.player) this.playerDeaths += 1;
       if (sourceSide) {
         this.teamFacts[sourceSide].championKills += 1;

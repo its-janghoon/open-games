@@ -8,6 +8,7 @@ import { initialStructure, isInhibitorAlive, reviveStructures } from './rift/str
 import { initialWaveSchedule, scheduleDueWaves } from './rift/waveSchedule';
 import { admitDueMinions, advanceMinions } from './rift/minionBodies';
 import { pruneTargets, resolveMinionCombat } from './rift/minionCombat';
+import { basicAttackBonus, createPassiveState, prunePassives } from './rift/passives';
 
 /**
  * Population cap per side and lane, and how long a deferred spawn waits.
@@ -110,6 +111,7 @@ export function createChampsSimulation(
       waves: initialWaveSchedule(),
       minions: [],
       targets: {},
+      passives: createPassiveState(),
       structures: {
         allyInhibitor: initialStructure(2000),
         enemyInhibitor: initialStructure(2000),
@@ -146,12 +148,27 @@ export function createChampsSimulation(
           const shooter = next.units.find((u) => u.id === id);
           const target = next.units.find((u) => u.id !== id);
           if (shooter && target && !shooter.dead) {
+            const resolved = basicAttackBonus(
+              {
+                championId: null,
+                attackerId: shooter.id,
+                targetId: target.id,
+                now: next.simTime,
+                items: [],
+                hasRedBuff: false,
+              },
+              next.passives,
+            );
+            const passiveBonus = resolved.bonusAd;
+            next.passives = resolved.state;
             queueImpact(next, {
               dueAt: next.simTime + SHOT_FLIGHT_SECONDS,
               source: { ...shooter, pos: { ...shooter.pos } },
               targetId: target.id,
               radius: 0,
-              rawDamage: shooter.ad,
+              // Passives are resolved HERE rather than at impact, because the queue copies the shooter as it was at
+              // cast time — a bonus computed on landing would be a different champion's bonus.
+              rawDamage: shooter.ad + passiveBonus,
               color: 0xffffff,
               stunDuration: 0,
               ability: false,
@@ -199,6 +216,7 @@ export function createChampsSimulation(
         if (victim.hp === 0) victim.dead = true;
       }
       // Prune AFTER the hits land, or a target that died this tick would lose its damage.
+      next.passives = prunePassives(next.passives, next.simTime);
       next.targets = pruneTargets(
         next.targets,
         new Set([...next.units.map((unit) => unit.id), ...next.minions.map((minion) => minion.id)]),

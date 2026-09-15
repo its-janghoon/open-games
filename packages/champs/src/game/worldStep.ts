@@ -10,6 +10,7 @@ import type { StructureState } from './rift/structures';
 import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import { cloneMinions, type MinionState } from './rift/minionBodies';
 import type { TargetTable } from './rift/minionCombat';
+import { clonePassiveState, type PassiveState } from './rift/passives';
 import {
   advanceAttackCooldown,
   distance,
@@ -279,6 +280,20 @@ export interface WorldState {
    * disagreeing about that.
    */
   targets: TargetTable;
+  /**
+   * Champion basic-attack passive state.
+   *
+   * The most deceptive gap of the set: it lived in three Maps and nothing about it is visible on screen — it only
+   * changes how much damage a swing does. So losing it in a rollback gave two peers identical positions, identical
+   * health bars and different damage numbers, which is the desync that surfaces minutes later with nothing left
+   * pointing at where it began.
+   *
+   * The BASIC-ATTACK subset only, and the boundary is worth stating because the name would otherwise over-promise:
+   * duskarrow's travel, nightveil's dash window, ashborne's stacks, sunfire's per-pair timer and the red buff. Two
+   * Maps remain on the scene holding the passives that are NOT here — nightveil's smoke, aegis, ironhold, reflect and
+   * an ability-side stack counter — because those are read by abilities and damage-taken paths rather than by a swing.
+   */
+  passives: PassiveState;
 }
 
 /**
@@ -323,6 +338,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     waves: cloneWaveSchedule(state.waves),
     minions: cloneMinions(state.minions),
     targets: { ...state.targets },
+    passives: clonePassiveState(state.passives),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

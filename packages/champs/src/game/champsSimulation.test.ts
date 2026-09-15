@@ -260,6 +260,7 @@ describe('champs world under rollback', () => {
         lives: { p1: createChampionLifeState() },
         pendingImpacts: [],
         nextInsertionOrder: 0,
+        passives: { counters: {}, deadlines: {} },
         targets: {},
         minions: [],
         waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
