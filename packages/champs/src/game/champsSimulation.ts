@@ -6,6 +6,17 @@ import { createEffectState } from './effects';
 import { initialGold } from './rift/economy';
 import { initialStructure, isInhibitorAlive, reviveStructures } from './rift/structures';
 import { initialWaveSchedule, scheduleDueWaves } from './rift/waveSchedule';
+import { admitDueMinions, advanceMinions } from './rift/minionBodies';
+
+/**
+ * Population cap per side and lane, and how long a deferred spawn waits.
+ *
+ * Taken from BattleScene's own constants rather than invented: the cap protects frame time, and a scheduled member that
+ * cannot be admitted is deferred rather than dropped, because dropping it would make the population depend on
+ * processing order.
+ */
+const MAX_LIVE_PER_LANE = 12;
+const RETRY_SECONDS = 1;
 import { LANES } from './rift/map';
 import {
   advanceEconomy,
@@ -96,6 +107,7 @@ export function createChampsSimulation(
         // One inhibitor per side, at full health. Enough to exercise the revive deadline under rollback without
       // needing structure combat in this harness, which BattleScene still owns.
       waves: initialWaveSchedule(),
+      minions: [],
       structures: {
         allyInhibitor: initialStructure(2000),
         enemyInhibitor: initialStructure(2000),
@@ -161,6 +173,8 @@ export function createChampsSimulation(
       // Scheduling runs after the revive, because a lane's wave composition depends on whether the enemy inhibitor
       // is standing THIS tick — schedule first and a wave could be upgraded to super minions by a structure that
       // came back on the very same tick.
+      // Admit, then walk. Admission first so a minion scheduled for THIS tick starts moving on it rather than idling a
+      // tick — and both are pure, so a replay reaches the same population and the same positions.
       next.waves = scheduleDueWaves(
         next.waves,
         next.simTime,
@@ -168,6 +182,9 @@ export function createChampsSimulation(
         { killedAt: Object.fromEntries(Object.entries(next.structures).map(([id, s]) => [id, s.killedAt])) },
         (now, killedAt) => isInhibitorAlive(now, killedAt),
       );
+      const admitted = admitDueMinions(next.minions, next.waves, next.simTime, MAX_LIVE_PER_LANE, RETRY_SECONDS);
+      next.minions = advanceMinions(admitted.minions, TICK_SECONDS);
+      next.waves = admitted.waves;
 
       // Resolve what has landed. Damage is computed from the SOURCE as it was at cast time,
       // which is why the queue copies the shooter rather than referencing it - a shooter that

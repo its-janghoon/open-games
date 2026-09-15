@@ -184,6 +184,21 @@ describe('cloneWorldState', () => {
     nextInsertionOrder: 4,
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
     structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
+    minions: [
+      {
+        id: 'm8-ally-mid',
+        type: 'melee',
+        team: 'ally',
+        lane: 'mid',
+        pos: { x: 12, y: 34 },
+        waypointIndex: 1,
+        distanceTravelled: 5,
+        hp: 60,
+        maxHp: 60,
+        dead: false,
+        atEnd: false,
+      },
+    ],
     waves: {
       spawnedWaves: 3,
       nextOrder: 9,
@@ -228,6 +243,11 @@ describe('cloneWorldState', () => {
     copy.structures.zz = { hp: 5, maxHp: 5, dead: false, killedAt: null };
     // Waves for the same reason as economy: scheduleDueWaves replaces the record rather than mutating it, so a
     // shared reference is harmless TODAY. This function promises independence regardless.
+    // Minions for the same reason as economy and waves: advanceMinions returns a new array, so sharing is harmless
+    // TODAY. This function promises independence regardless, and pos is an object a shallow copy would share.
+    copy.minions[0].hp = 1;
+    copy.minions[0].pos.x = -999;
+    copy.minions.push({ ...copy.minions[0], id: 'extra' });
     copy.waves.spawnedWaves = 42;
     copy.waves.nextOrder = 42;
     copy.waves.pending[0].dueAt = -1;
@@ -245,6 +265,9 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.minions).toHaveLength(1);
+    expect(original.minions[0].hp).toBe(60);
+    expect(original.minions[0].pos.x).toBe(12);
     expect(original.waves.spawnedWaves).toBe(3);
     expect(original.waves.nextOrder).toBe(9);
     expect(original.waves.pending[0].dueAt).toBe(31);
@@ -323,6 +346,7 @@ describe('advanceLives', () => {
     lives: { a: { phase: 'dead', diedAt: 0, respawnsAt, invulnerableUntil: null } },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 } },
@@ -404,6 +428,7 @@ describe('advanceEffects', () => {
     lives: { a: createChampionLifeState() },
     pendingImpacts: [],
     nextInsertionOrder: 0,
+    minions: [],
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},
     economy: {},

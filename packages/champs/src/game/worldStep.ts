@@ -8,6 +8,7 @@ import { expireEffects, type EffectState } from './effects';
 import { advanceGold, type GoldState } from './rift/economy';
 import type { StructureState } from './rift/structures';
 import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
+import { cloneMinions, type MinionState } from './rift/minionBodies';
 import {
   advanceAttackCooldown,
   distance,
@@ -255,6 +256,18 @@ export interface WorldState {
    * match is not yet rollback-proven. Named here rather than left for a reader to discover.
    */
   waves: WaveSchedule;
+  /**
+   * Live minions.
+   *
+   * The schedule decided WHICH minions exist and WHEN; this is what they then do. Their bodies were already plain data
+   * and advanceMinion was already pure, so what was missing was never the walk — it was the LIST. A rollback that
+   * restored champions into a world holding whatever minions the scene happened to have is a rollback that disagrees
+   * about the population of the map.
+   *
+   * Movement and admission only: minion COMBAT — targeting and basic attacks — is still in BattleScene, so this does
+   * not yet make a whole match rewindable. Said here rather than left for a reader to discover.
+   */
+  minions: MinionState[];
 }
 
 /**
@@ -297,6 +310,7 @@ export function cloneWorldState(state: WorldState): WorldState {
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
     waves: cloneWaveSchedule(state.waves),
+    minions: cloneMinions(state.minions),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

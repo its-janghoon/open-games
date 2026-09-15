@@ -260,6 +260,7 @@ describe('champs world under rollback', () => {
         lives: { p1: createChampionLifeState() },
         pendingImpacts: [],
         nextInsertionOrder: 0,
+        minions: [],
         waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
         structures: {},
         economy: {},
@@ -509,9 +510,16 @@ describe('champs world under rollback', () => {
     expect(late.resimulated, 'a mispredicted input must force a real replay').toBeGreaterThan(0);
 
     expect(session.peek().waves).toEqual(expected.waves);
-    // The window must actually cross a spawn, or a dropped schedule would be invisible.
+    /**
+     * The window must actually cross a spawn, or a dropped schedule would be invisible.
+     *
+     * This used to assert `pending.length > 0`, which was right until minions started being ADMITTED from the queue:
+     * now a due entry becomes a body and leaves the queue, so a full queue is no longer evidence that anything
+     * happened. What is evidence is that the wave was scheduled and that it turned into minions.
+     */
     expect(expected.waves.spawnedWaves, 'the window must cross the first wave').toBeGreaterThan(0);
-    expect(expected.waves.pending.length).toBeGreaterThan(0);
+    expect(expected.minions.length, 'and the scheduled wave must become bodies').toBeGreaterThan(0);
+    expect(session.peek().minions).toEqual(expected.minions);
   });
 
   it('refuses an input older than the rollback window instead of applying it to the wrong base', () => {
