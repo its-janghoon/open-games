@@ -252,12 +252,6 @@ export interface BattleSceneData {
 
 // Canvas dimensions (kept in sync with PhaserGame). The 3000x3000 rift world is
 // scaled uniformly into the canvas, leaving a small margin.
-const VIEW_W = 900;
-const VIEW_H = 640;
-const MARGIN = 20;
-const SCALE = Math.min(VIEW_W - MARGIN * 2, VIEW_H - MARGIN * 2) / WORLD_SIZE;
-const OFF_X = (VIEW_W - WORLD_SIZE * SCALE) / 2;
-const OFF_Y = (VIEW_H - WORLD_SIZE * SCALE) / 2;
 
 /**
  * Battle-camera tuning. The projection (see {@link ./rift/iso}) fits the WHOLE
@@ -333,10 +327,10 @@ const RESOURCE_REGEN = 8; // per second
 const SIMULATION_TICK_SECONDS = 1 / 60;
 const MAX_STEPS_PER_RENDER = 12;
 const HUD_INTERVAL_SECONDS = 0.1;
-const BASIC_PROJECTILE_SPEED = 1650 * SCALE;
-const SKILLSHOT_PROJECTILE_SPEED = 1350 * SCALE;
-const OBJECTIVE_ATTACK_RANGE = 280 * SCALE;
-const OBJECTIVE_LEASH_RANGE = 520 * SCALE;
+const BASIC_PROJECTILE_SPEED = 1650;
+const SKILLSHOT_PROJECTILE_SPEED = 1350;
+const OBJECTIVE_ATTACK_RANGE = 280;
+const OBJECTIVE_LEASH_RANGE = 520;
 
 /** Bounded cosmetic/runtime populations; authoritative impacts are never budgeted. */
 const MAX_TRANSIENT_VFX = 96;
@@ -369,27 +363,35 @@ const NEXUS_HEIGHT_PX = 30;
  * Convert a world coordinate (0..3000) to the FLAT gameplay-plane pixel space.
  *
  * IMPORTANT render model: `unit.pos` and ALL gameplay math (movement, distance,
- * attackRange*SCALE, moveSpeed*SCALE, clampX/clampY, aim) live in this flat
- * top-down pixel space, exactly as before the 2.5D overhaul. Only the DRAWING
- * is projected: the flat pixel is converted back to world units and run through
- * the FEAT-001 dimetric projection (see {@link project}). Keeping gameplay on
- * the flat plane means combat ranges/speeds are byte-for-byte unchanged.
+ * attackRange, moveSpeed, clampX/clampY, aim) live in WORLD units -- 0..WORLD_SIZE
+ * on both axes. Only the DRAWING is projected, through the FEAT-001 dimetric
+ * projection (see {@link project}).
+ *
+ * Gameplay used to live in a flat pixel space derived from SCALE, and SCALE was
+ * computed from the VIEWPORT. So every range and speed silently depended on the
+ * window size: two peers with different window sizes computed different distances
+ * from identical inputs, and the divergence would have looked like a netcode bug.
+ *
+ * World units are also what let this scene call the pure rift/ steps at all. Those
+ * are world-space by construction, so a rule shared between the scene and the
+ * simulation can have ONE implementation instead of one per coordinate system.
  */
-function toScreen(p: Vec2): Vec2 {
-  return { x: OFF_X + p.x * SCALE, y: OFF_Y + p.y * SCALE };
-}
-
-/** Inverse of {@link toScreen}: flat gameplay pixel -> world units (0..3000). */
-function pixelToWorld(p: Vec2): Vec2 {
-  return { x: (p.x - OFF_X) / SCALE, y: (p.y - OFF_Y) / SCALE };
-}
-
 /**
  * Project a flat gameplay-plane pixel to its on-screen dimetric position. This
  * is the single place the flat plane becomes 2.5D: pixel -> world -> screen.
  */
+/**
+ * Scale a WORLD length into a screen length.
+ *
+ * Only for lengths drawn at an already-projected point (a circle radius, a stroke width). Positions must go through
+ * {@link project} instead — a projection is not a uniform scale, so a position cannot be recovered from a length.
+ */
+function worldLengthToScreen(world: number): number {
+  return Math.max(5, world * projectionScale(DEFAULT_PROJECTION).sx);
+}
+
 function project(p: Vec2): Vec2 {
-  return worldToScreen(pixelToWorld(p), DEFAULT_PROJECTION);
+  return worldToScreen(p, DEFAULT_PROJECTION);
 }
 
 /**
@@ -399,7 +401,7 @@ function project(p: Vec2): Vec2 {
  * top. Height is converted from screen pixels to world units for the tie-break.
  */
 function depthForPixel(p: Vec2, heightPx = 0): number {
-  return depthFor(pixelToWorld(p), heightPx / HEIGHT_SCALE, DEFAULT_PROJECTION);
+  return depthFor(p, heightPx / HEIGHT_SCALE, DEFAULT_PROJECTION);
 }
 
 /** Depth band offsets so terrain < shadows < bodies without cross-mixing. */
@@ -872,6 +874,35 @@ export default class BattleScene extends Phaser.Scene {
     this.pushHud();
     this.nextHudAt = HUD_INTERVAL_SECONDS;
     this.settleCriticalTextures();
+
+    // Read-only observation surface for the browser probe, mirroring ringout's and gridfall's. A production bundle has
+    // no Phaser global, so without this a probe cannot reach the scene at all — and reading the WebGL canvas directly
+    // returns blank unless preserveDrawingBuffer is set.
+    //
+    // `space` exists to make the coordinate system checkable from outside. Gameplay moved from a viewport-derived pixel
+    // plane to world units, and the whole point of that change is a property no screenshot can show: the same match must
+    // compute the same distances at any window size.
+    (window as unknown as { __CHAMPS__?: unknown }).__CHAMPS__ = {
+      tick: () => this.elapsed,
+      space: () => ({
+        worldSize: WORLD_SIZE,
+        playerPos: this.player ? { ...this.player.unit.pos } : null,
+        playerRange: this.player?.unit.attackRange ?? null,
+        playerSpeed: this.player?.unit.moveSpeed ?? null,
+        bounds: this.allEntities.reduce(
+          (acc, e) => ({
+            minX: Math.min(acc.minX, e.unit.pos.x),
+            maxX: Math.max(acc.maxX, e.unit.pos.x),
+            minY: Math.min(acc.minY, e.unit.pos.y),
+            maxY: Math.max(acc.maxY, e.unit.pos.y),
+          }),
+          { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity },
+        ),
+        units: this.allEntities.length,
+      }),
+      camps: () => this.camps.map((c) => ({ id: c.camp.id, alive: c.members.filter((m) => !m.unit.dead).length, nextSpawnAt: c.nextSpawnAt })),
+      traps: () => this.traps.map((t) => ({ id: t.id, expiresAt: t.expiresAt, radius: t.radius })),
+    };
   }
 
   /** PhaserGame forwards both the initial preference and live media-query changes. */
@@ -1101,13 +1132,13 @@ export default class BattleScene extends Phaser.Scene {
     let enemyIndex = 0;
     for (const side of ['ally', 'enemy'] as MapSide[]) {
       const slots = side === 'ally' ? composition.ally : composition.enemy;
-      const base = toScreen(BASE_POSITIONS[side]);
+      const base = BASE_POSITIONS[side];
       for (const slot of slots) {
         // Fan the fountain spawns slightly so the five champions do not overlap.
         const n = side === 'ally' ? allyIndex++ : enemyIndex++;
         const spawn: Vec2 = {
-          x: this.clampX(base.x + (n - 2) * 16 * SCALE),
-          y: this.clampY(base.y + (n - 2) * 16 * SCALE),
+          x: this.clampX(base.x + (n - 2) * 16),
+          y: this.clampY(base.y + (n - 2) * 16),
         };
         const isHuman = slot.isHuman;
         const isFacingEnemy = side === 'enemy' && slot === facing;
@@ -1138,7 +1169,7 @@ export default class BattleScene extends Phaser.Scene {
             intentReadyAt: 0,
             nextDecisionAt: 0,
             lane: slot.lane,
-            pushPath: laneWaypoints(slot.lane, side).map(toScreen),
+            pushPath: laneWaypoints(slot.lane, side),
             pushIndex: 0,
           };
         }
@@ -1375,18 +1406,18 @@ export default class BattleScene extends Phaser.Scene {
     const lane = node.lane;
     switch (node.kind) {
       case 'outerTurret':
-        return toScreen(anchors.outerTurrets[lane!]);
+        return anchors.outerTurrets[lane!];
       case 'innerTurret':
-        return toScreen(anchors.innerTurrets[lane!]);
+        return anchors.innerTurrets[lane!];
       case 'inhibitorTurret':
-        return toScreen(anchors.inhibitorTurrets[lane!]);
+        return anchors.inhibitorTurrets[lane!];
       case 'inhibitor':
-        return toScreen(anchors.inhibitors[lane!]);
+        return anchors.inhibitors[lane!];
       case 'nexusTurret':
-        return toScreen(node.id.endsWith('-a') ? anchors.nexusTurrets[0] : anchors.nexusTurrets[1]);
+        return node.id.endsWith('-a') ? anchors.nexusTurrets[0] : anchors.nexusTurrets[1];
       case 'nexus':
       default:
-        return toScreen(anchors.nexus);
+        return anchors.nexus;
     }
   }
 
@@ -1424,9 +1455,9 @@ export default class BattleScene extends Phaser.Scene {
       maxHp: champion.stats.hp,
       ad: champion.stats.attackDamage,
       armor: 28,
-      attackRange: champion.stats.attackRange * SCALE,
+      attackRange: champion.stats.attackRange,
       attackSpeed: champion.stats.attackSpeed,
-      moveSpeed: champion.stats.moveSpeed * SCALE,
+      moveSpeed: champion.stats.moveSpeed,
     });
     // NOTE: the old SpriteFactory pose PREWARM was removed here. It rasterized
     // four SVG variants per player-facing champion to warm a cache the battle no
@@ -1551,7 +1582,7 @@ export default class BattleScene extends Phaser.Scene {
       maxHp,
       ad: isTurret ? TURRET_DAMAGE : 0,
       armor: 40,
-      attackRange: isTurret ? TURRET_RANGE * SCALE : 0,
+      attackRange: isTurret ? TURRET_RANGE : 0,
       attackSpeed: TURRET_ATTACK_SPEED,
       moveSpeed: 0,
     });
@@ -1611,8 +1642,8 @@ export default class BattleScene extends Phaser.Scene {
     u.ad = eff.attackDamage;
     u.armor = eff.armor;
     u.attackSpeed = eff.attackSpeed;
-    u.moveSpeed = eff.moveSpeed * SCALE;
-    u.attackRange = eff.attackRange * SCALE;
+    u.moveSpeed = eff.moveSpeed;
+    u.attackRange = eff.attackRange;
     entity.hpRegen = eff.hpRegen;
     entity.abilityPower = eff.abilityPower;
     if (isHuman) {
@@ -1742,8 +1773,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private pointerToGround(pointer: Phaser.Input.Pointer): Vec2 {
-    const world = screenToWorld({ x: pointer.worldX, y: pointer.worldY }, DEFAULT_PROJECTION);
-    return toScreen(world);
+    return screenToWorld({ x: pointer.worldX, y: pointer.worldY }, DEFAULT_PROJECTION);
   }
 
   private clientToGround(clientX: number, clientY: number): Vec2 {
@@ -1751,7 +1781,7 @@ export default class BattleScene extends Phaser.Scene {
     const canvasX = ((clientX - rect.left) / Math.max(1, rect.width)) * this.scale.gameSize.width;
     const canvasY = ((clientY - rect.top) / Math.max(1, rect.height)) * this.scale.gameSize.height;
     const projected = this.cameras.main.getWorldPoint(canvasX, canvasY);
-    return toScreen(screenToWorld(projected, DEFAULT_PROJECTION));
+    return screenToWorld(projected, DEFAULT_PROJECTION);
   }
 
   private clearAimPreview(): void {
@@ -1773,7 +1803,7 @@ export default class BattleScene extends Phaser.Scene {
     const endpoint = this.resolveCastEndpoint(this.player, ability, aim);
     const color = Phaser.Display.Color.HexStringToColor(this.playerChampion.accentColor).color;
     const points: Phaser.Geom.Point[] = [];
-    const radius = ability.range * SCALE;
+    const radius = ability.range;
     for (let index = 0; index <= 40; index += 1) {
       const angle = (Math.PI * 2 * index) / 40;
       const point = project({ x: origin.x + Math.cos(angle) * radius, y: origin.y + Math.sin(angle) * radius });
@@ -1784,7 +1814,7 @@ export default class BattleScene extends Phaser.Scene {
     graphics.clear();
     graphics.lineStyle(2, color, 0.7).strokePoints(points, true, false);
     graphics.lineStyle(4, color, 0.9).lineBetween(from.x, from.y, to.x, to.y);
-    graphics.fillStyle(color, 0.3).fillCircle(to.x, to.y, Math.max(5, (ability.mechanics?.radius ?? 34) * SCALE));
+    graphics.fillStyle(color, 0.3).fillCircle(to.x, to.y, worldLengthToScreen(ability.mechanics?.radius ?? 34));
   }
 
   private entityAtPoint(point: Vec2, source: Unit): Entity | undefined {
@@ -1792,7 +1822,7 @@ export default class BattleScene extends Phaser.Scene {
       this.allEntities.filter((entity) => !entity.unit.dead).map((entity) => entity.unit.id),
     );
     let best: Entity | undefined;
-    let bestDistance = 90 * SCALE;
+    let bestDistance = 90;
     for (const entity of this.allEntities) {
       if (!areHostile(source.team, entity.unit.team) || !this.isEntityDamageable(entity)) continue;
       if (
@@ -2044,7 +2074,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private tickRecall() {
     if (this.recallStartedAt === null || this.elapsed - this.recallStartedAt < 6) return;
-    this.player.unit.pos = { ...toScreen(BASE_POSITIONS.ally) };
+    this.player.unit.pos = { ...BASE_POSITIONS.ally };
     this.recallStartedAt = null;
   }
 
@@ -2172,8 +2202,8 @@ export default class BattleScene extends Phaser.Scene {
 
   /** Whether a champion is close enough to its fountain to shop. */
   private inBase(u: Unit, side: MapSide): boolean {
-    const base = toScreen(BASE_POSITIONS[side]);
-    return distance(u.pos, base) <= 220 * SCALE;
+    const base = BASE_POSITIONS[side];
+    return distance(u.pos, base) <= 220;
   }
 
   private maybeSpawnWaves() {
@@ -2232,7 +2262,7 @@ export default class BattleScene extends Phaser.Scene {
   private spawnLaneMinion(type: MinionType, team: MapSide, lane: Lane) {
     const rift = spawnMinion(type, team, lane);
     const stats = minionStats(type);
-    const screenPos = toScreen(rift.pos);
+    const screenPos = rift.pos;
     const unit = this.makeUnit(
       `minion-${team}-${lane}-${type}-${this.minionSequence++}`,
       'minion',
@@ -2242,9 +2272,9 @@ export default class BattleScene extends Phaser.Scene {
         maxHp: stats.hp,
         ad: stats.ad,
         armor: stats.armor,
-        attackRange: stats.attackRange * SCALE,
+        attackRange: stats.attackRange,
         attackSpeed: 1.25,
-        moveSpeed: stats.moveSpeed * SCALE,
+        moveSpeed: stats.moveSpeed,
       },
     );
     // Minions carry their OWN palette from the sheet (they no longer borrow the
@@ -2267,7 +2297,7 @@ export default class BattleScene extends Phaser.Scene {
       stunned: 0,
       effects: createEffectState(),
       rift,
-      path: laneWaypoints(lane, team).map(toScreen),
+      path: laneWaypoints(lane, team),
       minionType: type,
     };
     this.attachHpBar(entity, size.height + 6);
@@ -2331,7 +2361,7 @@ export default class BattleScene extends Phaser.Scene {
     if (this.player.stunned > 0 || this.playerOrder === 'stop') return;
 
     if (this.playerOrder === 'target') {
-      const target = this.findTarget(u, 1600 * SCALE, true);
+      const target = this.findTarget(u, 1600, true);
       if (!target) {
         this.playerOrder = 'stop';
         return;
@@ -2342,7 +2372,7 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     if (this.playerOrder === 'attack-move') {
-      const target = this.findTarget(u, 450 * SCALE);
+      const target = this.findTarget(u, 450);
       if (target) {
         if (distance(u.pos, target.pos) <= u.attackRange) this.tryBasicAttack(this.player, target);
         else this.moveUnitToward(u, target.pos, dt);
@@ -2375,7 +2405,7 @@ export default class BattleScene extends Phaser.Scene {
     if (bot.stunned > 0) return;
 
     const objective = this.objectiveForBot(bot);
-    const target = objective?.unit ?? this.findTarget(u, 1200 * SCALE, true);
+    const target = objective?.unit ?? this.findTarget(u, 1200, true);
     const cadence = DIFFICULTY_CONFIG[this.difficulty];
 
     // Difficulty changes both how quickly a bot can react and how often it may
@@ -2395,7 +2425,7 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     const intent = state.currentIntent;
-    const homeBase = toScreen(BASE_POSITIONS[state.side]);
+    const homeBase = BASE_POSITIONS[state.side];
 
     switch (intent) {
       case 'approach': {
@@ -2408,7 +2438,7 @@ export default class BattleScene extends Phaser.Scene {
           // bot keeps marching toward the enemy nexus.
           if (
             state.pushIndex < state.pushPath.length - 1 &&
-            distance(u.pos, goal) <= 30 * SCALE
+            distance(u.pos, goal) <= 30
           ) {
             state.pushIndex += 1;
           }
@@ -2448,7 +2478,7 @@ export default class BattleScene extends Phaser.Scene {
         (objective): objective is Entity =>
           objective != null &&
           this.isEntityDamageable(objective) &&
-          distance(bot.unit.pos, objective.unit.pos) <= 1800 * SCALE,
+          distance(bot.unit.pos, objective.unit.pos) <= 1800,
       )
       .sort(
         (a, b) =>
@@ -2465,7 +2495,7 @@ export default class BattleScene extends Phaser.Scene {
    */
   private laneAdvanceGoal(state: BotState): Vec2 {
     const path = state.pushPath;
-    if (path.length === 0) return toScreen(BASE_POSITIONS[state.side]);
+    if (path.length === 0) return BASE_POSITIONS[state.side];
     // (path is authored ally->enemy; laneWaypoints already reversed for enemy).
     return path[Math.min(state.pushIndex, path.length - 1)];
   }
@@ -2522,10 +2552,10 @@ export default class BattleScene extends Phaser.Scene {
     const dist = target ? distance(u.pos, target.pos) : Infinity;
     const [q, w, e, r] = state.champion.abilities;
     const nearbyChampions = this.champions.filter(
-      (entity) => isChampionPresent(entity.life!) && distance(entity.unit.pos, u.pos) <= 650 * SCALE,
+      (entity) => isChampionPresent(entity.life!) && distance(entity.unit.pos, u.pos) <= 650,
     );
     const nearbyMinions = this.minions.filter(
-      (entity) => !entity.unit.dead && distance(entity.unit.pos, u.pos) <= 600 * SCALE,
+      (entity) => !entity.unit.dead && distance(entity.unit.pos, u.pos) <= 600,
     );
     const alliedWave = nearbyMinions.filter((entity) => entity.unit.team === u.team).length;
     const hostileWave = nearbyMinions.filter((entity) => areHostile(u.team, entity.unit.team)).length;
@@ -2536,7 +2566,7 @@ export default class BattleScene extends Phaser.Scene {
       (objective) =>
         objective.entity != null &&
         !objective.entity.unit.dead &&
-        distance(objective.entity.unit.pos, u.pos) <= 1000 * SCALE,
+        distance(objective.entity.unit.pos, u.pos) <= 1000,
     )
       ? 1
       : 0;
@@ -2557,10 +2587,10 @@ export default class BattleScene extends Phaser.Scene {
       attackRange: u.attackRange,
       cooldowns: state.cds,
       abilityRanges: {
-        Q: q.range * SCALE,
-        W: w.range * SCALE,
-        E: e.range * SCALE,
-        R: r.range * SCALE,
+        Q: q.range,
+        W: w.range,
+        E: e.range,
+        R: r.range,
       },
       abilityCosts: { Q: q.cost, W: w.cost, E: e.cost, R: r.cost },
       abilityBehaviors: { Q: q.behavior, W: w.behavior, E: e.behavior, R: r.behavior },
@@ -2584,7 +2614,7 @@ export default class BattleScene extends Phaser.Scene {
     for (const m of this.minions) {
       const u = m.unit;
       if (u.dead || !m.rift || !m.path) continue;
-      const target = this.findTarget(u, 200 * SCALE);
+      const target = this.findTarget(u, 200);
       if (target && distance(u.pos, target.pos) <= u.attackRange) {
         this.tryBasicAttackUnit(m, target);
       } else {
@@ -2596,7 +2626,7 @@ export default class BattleScene extends Phaser.Scene {
         m.rift.pos = res.pos;
         m.rift.waypointIndex = res.waypointIndex;
         m.rift.distanceTravelled = res.distanceTravelled;
-        const screen = toScreen(res.pos);
+        const screen = res.pos;
         u.pos.x = screen.x;
         u.pos.y = screen.y;
       }
@@ -2661,7 +2691,7 @@ export default class BattleScene extends Phaser.Scene {
     if (attacker.champion) {
       this.setChampionPose(attacker, 'attack', CHAMPION_POSE_HOLD_MS.attack, 1);
     }
-    if (u.attackRange > 220 * SCALE) {
+    if (u.attackRange > 220) {
       const dueAt = this.queueTargetedImpact(
         attacker,
         target,
@@ -2712,8 +2742,8 @@ export default class BattleScene extends Phaser.Scene {
         (ally) =>
           ally.unit.team === caster.unit.team &&
           isChampionPresent(ally.life!) &&
-          distance(ally.unit.pos, caster.unit.pos) <= ability.range * SCALE &&
-          distance(ally.unit.pos, aim) <= 90 * SCALE,
+          distance(ally.unit.pos, caster.unit.pos) <= ability.range &&
+          distance(ally.unit.pos, aim) <= 90,
       )
       .sort(
         (a, b) =>
@@ -2728,7 +2758,7 @@ export default class BattleScene extends Phaser.Scene {
         (ally) =>
           ally.unit.team === caster.unit.team &&
           isChampionPresent(ally.life!) &&
-          distance(ally.unit.pos, caster.unit.pos) <= ability.range * SCALE,
+          distance(ally.unit.pos, caster.unit.pos) <= ability.range,
       )
       .sort(
         (a, b) =>
@@ -2742,7 +2772,7 @@ export default class BattleScene extends Phaser.Scene {
     const candidates = this.champions
       .filter(
         (ally) => ally.unit.team === side && isChampionPresent(ally.life!) &&
-          distance(ally.unit.pos, caster.unit.pos) <= (champion.id === 'dawnsong' ? 600 : 650) * SCALE,
+          distance(ally.unit.pos, caster.unit.pos) <= (champion.id === 'dawnsong' ? 600 : 650),
       )
       .sort(
         (a, b) => a.unit.hp / a.unit.maxHp - b.unit.hp / b.unit.maxHp || a.unit.id.localeCompare(b.unit.id),
@@ -2814,14 +2844,14 @@ export default class BattleScene extends Phaser.Scene {
       ? lowestHpRatioHostile(
           caster.unit,
           this.champions.filter((entity) => this.isEntityDamageable(entity)).map((entity) => entity.unit),
-          ability.range * SCALE,
+          ability.range,
         )
       : undefined;
     if (ability.mechanics?.targetPolicy === 'aimed-ally' && !aimedAlly) return;
     if (ability.mechanics?.targetPolicy === 'lowest-hp-ratio-hostile' && !executeTarget) return;
     const resolvedAim = aimedAlly?.unit.pos ?? executeTarget?.pos ?? aim;
     const endpoint = this.resolveCastEndpoint(caster, ability, resolvedAim);
-    if (executeTarget && distance(endpoint, executeTarget.pos) > 50 * SCALE) return;
+    if (executeTarget && distance(endpoint, executeTarget.pos) > 50) return;
     if (!spend()) return;
     if (caster === this.player) this.recordLearning(`cast-${slot}` as LearningAction);
     startCooldown(cds, slot, this.cooldownFor(caster, champion, slot));
@@ -2848,7 +2878,7 @@ export default class BattleScene extends Phaser.Scene {
     const alliesInRange = this.champions
       .filter(
         (ally) => ally.unit.team === caster.unit.team && isChampionPresent(ally.life!) &&
-          distance(ally.unit.pos, caster.unit.pos) <= ability.range * SCALE,
+          distance(ally.unit.pos, caster.unit.pos) <= ability.range,
       )
       .sort(
         (a, b) => a.unit.hp / a.unit.maxHp - b.unit.hp / b.unit.maxHp || a.unit.id.localeCompare(b.unit.id),
@@ -2900,7 +2930,7 @@ export default class BattleScene extends Phaser.Scene {
         id: `trap-${caster.unit.id}-${this.authorityInsertionOrder++}`,
         source: { ...caster.unit, pos: { ...origin } },
         point: { ...endpoint },
-        radius: (ability.mechanics?.radius ?? 90) * SCALE,
+        radius: (ability.mechanics?.radius ?? 90),
         rawDamage: abilityDamage(ability.damage, caster.abilityPower ?? 0),
         color,
         expiresAt: this.elapsed + (ability.mechanics?.trapDuration ?? 4),
@@ -2912,7 +2942,7 @@ export default class BattleScene extends Phaser.Scene {
 
     if (effect.damage > 0) {
       const itemIds = caster === this.player ? this.ownedItems : caster.bot?.ownedItems ?? [];
-      const hitRadius = effect.area ? (ability.mechanics?.radius ?? effect.radius) * SCALE : effect.dashes ? 40 : 34;
+      const hitRadius = effect.area ? (ability.mechanics?.radius ?? effect.radius) : effect.dashes ? 40 : 34;
       const damage = abilityDamage(effect.damage, caster.abilityPower ?? 0);
       const dueAt = effect.dashes
         ? this.elapsed
@@ -2933,7 +2963,7 @@ export default class BattleScene extends Phaser.Scene {
                 line: {
                   origin: { ...origin },
                   endpoint: { ...endpoint },
-                  halfWidth: ability.mechanics.lineWidth * SCALE,
+                  halfWidth: ability.mechanics.lineWidth,
                   subsequentDamageMultiplier: ability.mechanics.piercingDamageMultiplier ?? 1,
                 },
               }
@@ -2961,22 +2991,22 @@ export default class BattleScene extends Phaser.Scene {
       pan: Phaser.Math.Clamp((sourceScreen.x - listenerScreen.x) / 320, -1, 1),
       // Audio distance is intentionally abstract/small; the engine applies
       // inverse attenuation, so raw world pixels would make every remote cue mute.
-      distance: Phaser.Math.Clamp(distance(source, listener) / (500 * SCALE), 0, 4),
+      distance: Phaser.Math.Clamp(distance(source, listener) / (500), 0, 4),
     };
   }
 
   private resolveCastEndpoint(caster: Entity, ability: Ability, aim: Vec2): Vec2 {
     const origin = caster.unit.pos;
-    const range = ability.range * SCALE;
+    const range = ability.range;
     if (ability.behavior === 'dash' || ability.mechanics?.dash) {
       const blockers = this.structures
         .filter((structure) => !structure.unit.dead)
-        .map((structure) => ({ id: structure.unit.id, pos: structure.unit.pos, radius: 52 * SCALE }));
+        .map((structure) => ({ id: structure.unit.id, pos: structure.unit.pos, radius: 52 }));
       return resolveDashEndpoint(
         origin,
         aim,
         range,
-        { minX: OFF_X, maxX: OFF_X + WORLD_SIZE * SCALE, minY: OFF_Y, maxY: OFF_Y + WORLD_SIZE * SCALE },
+        { minX: 0, maxX: WORLD_SIZE, minY: 0, maxY: WORLD_SIZE },
         blockers,
         ability.mechanics?.direction === 'away-from-aim',
       );
@@ -2992,11 +3022,11 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private clampX(x: number): number {
-    return Phaser.Math.Clamp(x, OFF_X, OFF_X + WORLD_SIZE * SCALE);
+    return Phaser.Math.Clamp(x, 0, WORLD_SIZE);
   }
 
   private clampY(y: number): number {
-    return Phaser.Math.Clamp(y, OFF_Y, OFF_Y + WORLD_SIZE * SCALE);
+    return Phaser.Math.Clamp(y, 0, WORLD_SIZE);
   }
 
   private moveUnitToward(u: Unit, goal: Vec2, dt: number) {
@@ -3011,8 +3041,8 @@ export default class BattleScene extends Phaser.Scene {
       (this.internalCooldowns.get(`nightveil-smoke:${u.id}`) ?? 0) > this.elapsed ? 1.2 : 1;
     const huntingBonus = entity?.champion?.id === 'grimtrail' && this.champions.some(
       (candidate) => areHostile(u.team, candidate.unit.team) && !candidate.unit.dead &&
-        candidate.unit.hp / candidate.unit.maxHp < 0.35 && distance(u.pos, candidate.unit.pos) <= 700 * SCALE,
-    ) ? 25 * SCALE : 0;
+        candidate.unit.hp / candidate.unit.maxHp < 0.35 && distance(u.pos, candidate.unit.pos) <= 700,
+    ) ? 25 : 0;
     const effectState = entity?.effects;
     // The arithmetic itself lives in game/worldStep so a headless rollback step and the
     // scene cannot drift apart. The scene keeps deciding WHAT the modifiers are; the
@@ -3028,16 +3058,16 @@ export default class BattleScene extends Phaser.Scene {
         slowFactor: effectState ? readSlow(effectState, this.elapsed) : 0,
       },
       {
-        minX: OFF_X,
-        maxX: OFF_X + WORLD_SIZE * SCALE,
-        minY: OFF_Y,
-        maxY: OFF_Y + WORLD_SIZE * SCALE,
+        minX: 0,
+        maxX: WORLD_SIZE,
+        minY: 0,
+        maxY: WORLD_SIZE,
       },
     );
     const champion = this.entityForUnit(u);
     if (champion === this.player && travel > 0) this.recordLearning('move');
     if (champion?.champion?.id === 'duskarrow' && travel > 0) {
-      this.passives = addTravelled(this.passives, u.id, travel / SCALE);
+      this.passives = addTravelled(this.passives, u.id, travel);
     }
     if (champion?.champion && travel > 0) champion.movedThisFrame = true;
   }
@@ -3059,7 +3089,7 @@ export default class BattleScene extends Phaser.Scene {
         const side: MapSide = entity.bot?.side ?? 'ally';
         entity.unit.dead = false;
         entity.unit.hp = entity.unit.maxHp;
-        entity.unit.pos = { ...toScreen(BASE_POSITIONS[side]) };
+        entity.unit.pos = { ...BASE_POSITIONS[side] };
         entity.stunned = 0;
         entity.container.setVisible(true).setAlpha(1);
         entity.shadow?.setVisible(true).setAlpha(0.32);
@@ -3151,7 +3181,7 @@ export default class BattleScene extends Phaser.Scene {
   private spawnObjective(id: EpicMonster): Entity {
     const profile = monsterStats(id);
     const pit = EPIC_PITS.find((candidate) => candidate.id === id)!;
-    const pos = toScreen(pit.pos);
+    const pos = pit.pos;
     const unit = this.makeUnit(`objective-${id}-${Math.round(this.elapsed * 1000)}`, 'monster', 'neutral', pos, {
       maxHp: profile.hp,
       ad: profile.ad,
@@ -3185,7 +3215,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private spawnCamp(camp: Camp): Entity[] {
-    const center = toScreen(camp.pos);
+    const center = camp.pos;
     const tintByType: Record<Camp['type'], number> = {
       blue: 0x4f8fff,
       red: 0xe85b45,
@@ -3197,7 +3227,7 @@ export default class BattleScene extends Phaser.Scene {
     };
     return camp.members.map((member, index) => {
       const angle = camp.members.length === 1 ? 0 : (Math.PI * 2 * index) / camp.members.length;
-      const spread = camp.members.length === 1 ? 0 : 42 * SCALE;
+      const spread = camp.members.length === 1 ? 0 : 42;
       const pos = {
         x: center.x + Math.cos(angle) * spread,
         y: center.y + Math.sin(angle) * spread,
@@ -3206,9 +3236,9 @@ export default class BattleScene extends Phaser.Scene {
         maxHp: member.hp,
         ad: member.ad,
         armor: member.armor,
-        attackRange: 160 * SCALE,
+        attackRange: 160,
         attackSpeed: 0.7,
-        moveSpeed: 260 * SCALE,
+        moveSpeed: 260,
       });
       const key = markerSheetKey('jungle');
       const size: SpriteSize = {
@@ -3238,10 +3268,10 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private campMemberHome(runtime: CampRuntime, member: Entity): Vec2 {
-    const center = toScreen(runtime.camp.pos);
+    const center = runtime.camp.pos;
     const index = Math.max(0, runtime.camp.members.findIndex((candidate) => candidate.key === member.campMemberKey));
     const angle = runtime.camp.members.length === 1 ? 0 : (Math.PI * 2 * index) / runtime.camp.members.length;
-    const spread = runtime.camp.members.length === 1 ? 0 : 42 * SCALE;
+    const spread = runtime.camp.members.length === 1 ? 0 : 42;
     return { x: center.x + Math.cos(angle) * spread, y: center.y + Math.sin(angle) * spread };
   }
 
@@ -3250,8 +3280,8 @@ export default class BattleScene extends Phaser.Scene {
       for (const campEntity of runtime.members) {
         if (campEntity.unit.dead || campEntity.stunned > 0) continue;
         const home = this.campMemberHome(runtime, campEntity);
-        const target = this.findTarget(campEntity.unit, 420 * SCALE);
-        if (target && distance(target.pos, toScreen(runtime.camp.pos)) <= 620 * SCALE) {
+        const target = this.findTarget(campEntity.unit, 420);
+        if (target && distance(target.pos, runtime.camp.pos) <= 620) {
           if (distance(campEntity.unit.pos, target.pos) <= campEntity.unit.attackRange) {
             this.tryBasicAttackUnit(campEntity, target);
           } else this.moveUnitToward(campEntity.unit, target.pos, dt);
@@ -3450,7 +3480,7 @@ export default class BattleScene extends Phaser.Scene {
         target.effects,
         `ability:${sourceUnit.id}`,
         sourceUnit.pos,
-        600 * SCALE,
+        600,
         this.elapsed + options.pullDuration!,
       );
     }
@@ -3630,8 +3660,8 @@ export default class BattleScene extends Phaser.Scene {
       )
       .sort(
         (a, b) =>
-          distance(a.unit.pos, toScreen(BASE_POSITIONS[sourceSide])) -
-            distance(b.unit.pos, toScreen(BASE_POSITIONS[sourceSide])) ||
+          distance(a.unit.pos, BASE_POSITIONS[sourceSide]) -
+            distance(b.unit.pos, BASE_POSITIONS[sourceSide]) ||
           a.unit.id.localeCompare(b.unit.id),
       );
   }
@@ -3648,7 +3678,7 @@ export default class BattleScene extends Phaser.Scene {
       (entity) =>
         !entity.unit.dead &&
         entity.unit.team === 'enemy' &&
-        distance(entity.unit.pos, target.unit.pos) <= 650 * SCALE,
+        distance(entity.unit.pos, target.unit.pos) <= 650,
     ));
     if (shouldDeployHeldWarden({
       now: this.elapsed,
@@ -4362,8 +4392,8 @@ export default class BattleScene extends Phaser.Scene {
       .filter((e) => !e.unit.dead && e.container.visible)
       .map((e) => ({
         id: e.unit.id,
-        x: Phaser.Math.Clamp((e.unit.pos.x - OFF_X) / (WORLD_SIZE * SCALE), 0, 1),
-        y: Phaser.Math.Clamp((e.unit.pos.y - OFF_Y) / (WORLD_SIZE * SCALE), 0, 1),
+        x: Phaser.Math.Clamp(e.unit.pos.x / WORLD_SIZE, 0, 1),
+        y: Phaser.Math.Clamp(e.unit.pos.y / WORLD_SIZE, 0, 1),
         kind: e.unit.kind,
         team: e.unit.team as 'ally' | 'enemy',
       }));
