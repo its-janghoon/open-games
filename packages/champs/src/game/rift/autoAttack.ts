@@ -34,6 +34,8 @@ export interface AutoAttacker {
    * version of the rule would forbid this field for no reason.
    */
   attackCdRemaining: number;
+  /** Attacks per second. The interval comes from this, exactly as combat.ts's `resetAttackCooldown` does it. */
+  attackSpeed: number;
   /** Seconds of stun left. Same reasoning as the cooldown. */
   stunned: number;
   dead: boolean;
@@ -124,14 +126,22 @@ export function resolveAutoAttacks(
 }
 
 /**
- * Seconds between swings for an auto-attacker.
+ * Seconds between swings for an auto-attacker: one attack interval at its attack speed.
  *
- * One function rather than a field so the rule lives somewhere testable. Turrets and monsters both fire on a fixed
- * interval in the scene; deriving it here keeps the step free of a magic number.
+ * This is `resetAttackCooldown`'s rule from combat.ts, deliberately identical — `attackSpeed <= 0` disables attacking
+ * rather than dividing by zero.
+ *
+ * It did not start out that way, and the mistake is worth recording because the test suite hid it. The first version of
+ * this module invented a RANGE-based interval (1.4s beyond 300 units, 1s inside it) on the reasoning that longer reach
+ * should fire more slowly. The scene has never done that: it calls `resetAttackCooldown`, which is `1 / attackSpeed`. So
+ * the extracted "shared" rule was not the rule being shared, and adopting it in the scene would have silently changed
+ * every turret's fire rate under cover of a refactor.
+ *
+ * A test asserted the invented behaviour and passed, which proved only that the invention was self-consistent. An
+ * extraction has to take the ORIGINAL rule, and a test written from the new code cannot tell you that it did.
  */
-export function attackIntervalFor(attacker: Pick<AutoAttacker, 'attackRange'>): number {
-  // Longer reach fires more slowly, which is what keeps a long-range turret from out-damaging everything near it.
-  return attacker.attackRange > 300 ? 1.4 : 1;
+export function attackIntervalFor(attacker: Pick<AutoAttacker, 'attackSpeed'>): number {
+  return attacker.attackSpeed > 0 ? 1 / attacker.attackSpeed : Infinity;
 }
 
 /** A fully independent copy — pos is an object a shallow copy would share. */

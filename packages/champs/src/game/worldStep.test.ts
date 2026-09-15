@@ -197,6 +197,7 @@ describe('cloneWorldState', () => {
         ad: 90,
         attackRange: 200,
         attackCdRemaining: 0,
+        attackSpeed: 0.8,
         stunned: 0,
         dead: false,
       },

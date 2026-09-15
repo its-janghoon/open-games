@@ -176,6 +176,8 @@ import {
   type ProgressState,
 } from '../rift/economy';
 import { composeTeams, enemyFacingSlot } from '../rift/teams';
+import { resolveAutoAttacks, type AutoAttacker } from '../rift/autoAttack';
+import type { TargetTable } from '../rift/minionCombat';
 import {
   computeEffectiveStats,
   recommendBuild,
@@ -668,6 +670,14 @@ export default class BattleScene extends Phaser.Scene {
   private allyDragonStacks = 0;
   private enemyDragonStacks = 0;
   private objectives: ObjectiveRuntime[] = [];
+  /**
+   * Which enemy each auto-attacker has locked on to, persisted between ticks.
+   *
+   * Scene-side for now. It belongs in the snapshot — a rollback that restored positions but not who had locked on would
+   * re-pick targets on replay — and moving it there is the rollback wiring's job, not this change's.
+   */
+  private autoAttackTargets: TargetTable = {};
+
   private camps: CampRuntime[] = [];
   private traps: TrapRuntime[] = [];
   private trapGraphics = new Map<string, Phaser.GameObjects.Arc>();
@@ -901,6 +911,12 @@ export default class BattleScene extends Phaser.Scene {
         units: this.allEntities.length,
       }),
       camps: () => this.camps.map((c) => ({ id: c.camp.id, alive: c.members.filter((m) => !m.unit.dead).length, nextSpawnAt: c.nextSpawnAt })),
+      // Who each auto-attacker has locked on to, so a probe can prove turrets are still deciding after the shared-rule
+      // adoption — a passing unit suite cannot, since it does not drive this scene.
+      locks: () => ({ ...this.autoAttackTargets }),
+      structureHp: () => this.allEntities
+        .filter((e) => e.unit.kind === 'turret' || e.unit.kind === 'nexus')
+        .map((e) => ({ id: e.unit.id, hp: Math.round(e.unit.hp) })),
       traps: () => this.traps.map((t) => ({ id: t.id, expiresAt: t.expiresAt, radius: t.radius })),
     };
   }
@@ -2633,21 +2649,53 @@ export default class BattleScene extends Phaser.Scene {
     }
   }
 
-  private updateTurret(turret: Entity) {
-    const u = turret.unit;
+  /**
+   * One tick of a turret's or objective monster's auto-attack, through the SHARED extracted rule.
+   *
+   * Both used to have their own copy of "pick a hostile in range, fire if off cooldown, reset", and the pure step in
+   * rift/autoAttack.ts was a third. It could not be called from here until gameplay moved to world units, because the
+   * step is world-space by construction and this scene computed in viewport-derived pixels.
+   *
+   * The scene keeps its own storage and its own drawing. What it delegates is the DECISION — which target, and whether
+   * to fire — so there is exactly one implementation of the part that has to agree between peers.
+   */
+  private runAutoAttack(entity: Entity, color: number, drawAs: 'beam' | 'projectile', range: number): void {
+    const u = entity.unit;
     if (u.dead) return;
-    const target = this.findTarget(u, u.attackRange);
-    if (target && canBasicAttack(u)) {
-      const dueAt = this.queueTargetedImpact(
-        turret,
-        target,
-        u.ad,
-        0xffcc55,
-        BASIC_PROJECTILE_SPEED,
-      );
-      this.drawBeam(u.pos, target.pos, 0xffcc55, Math.max(1, (dueAt - this.elapsed) * 1000));
+
+    const attacker: AutoAttacker = {
+      id: u.id,
+      team: u.team,
+      pos: u.pos,
+      ad: u.ad,
+      attackRange: range,
+      attackCdRemaining: u.attackCdRemaining,
+      attackSpeed: u.attackSpeed,
+      stunned: entity.stunned,
+      dead: u.dead,
+    };
+    const reachable = this.allEntities
+      .filter((candidate) => this.isEntityDamageable(candidate) && this.canDamageTarget(u, candidate))
+      .map((candidate) => candidate.unit);
+
+    // dt is 0: the scene already advanced this unit's cooldown in regenAndTick, and passing a real dt here would advance
+    // it twice. The step is being asked to DECIDE, not to keep time.
+    const result = resolveAutoAttacks([attacker], reachable, this.autoAttackTargets, 0, BASIC_PROJECTILE_SPEED);
+    this.autoAttackTargets = result.targets;
+
+    for (const shot of result.shots) {
+      const target = reachable.find((candidate) => candidate.id === shot.targetId);
+      if (!target) continue;
+      const dueAt = this.queueTargetedImpact(entity, target, shot.rawDamage, color, BASIC_PROJECTILE_SPEED);
+      const ms = Math.max(1, (dueAt - this.elapsed) * 1000);
+      if (drawAs === 'beam') this.drawBeam(u.pos, target.pos, color, ms);
+      else this.drawProjectile(u.pos, target.pos, color, ms);
       resetAttackCooldown(u);
     }
+  }
+
+  private updateTurret(turret: Entity) {
+    this.runAutoAttack(turret, 0xffcc55, 'beam', turret.unit.attackRange);
   }
 
   // ---- Combat actions ------------------------------------------------------
@@ -3298,27 +3346,13 @@ export default class BattleScene extends Phaser.Scene {
   private updateObjectiveMonsters() {
     for (const runtime of this.objectives) {
       const objective = runtime.entity;
-      if (!objective || objective.unit.dead || objective.stunned > 0) continue;
-      const target = this.findTarget(
-        objective.unit,
+      if (!objective) continue;
+      this.runAutoAttack(
+        objective,
+        0xe8b84d,
+        'projectile',
         Math.min(OBJECTIVE_ATTACK_RANGE, OBJECTIVE_LEASH_RANGE),
       );
-      if (target && canBasicAttack(objective.unit)) {
-        const dueAt = this.queueTargetedImpact(
-          objective,
-          target,
-          objective.unit.ad,
-          0xe8b84d,
-          BASIC_PROJECTILE_SPEED,
-        );
-        this.drawProjectile(
-          objective.unit.pos,
-          target.pos,
-          0xe8b84d,
-          Math.max(1, (dueAt - this.elapsed) * 1000),
-        );
-        resetAttackCooldown(objective.unit);
-      }
     }
   }
 

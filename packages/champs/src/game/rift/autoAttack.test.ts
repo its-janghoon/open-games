@@ -19,6 +19,7 @@ function turret(over: Partial<AutoAttacker> = {}): AutoAttacker {
     ad: 90,
     attackRange: 200,
     attackCdRemaining: 0,
+    attackSpeed: 1,
     stunned: 0,
     dead: false,
     ...over,
@@ -127,9 +128,21 @@ describe('auto-attackers', () => {
     expect(shots).toBeLessThan(5);
   });
 
-  it('makes a longer-ranged attacker fire more slowly', () => {
-    // Otherwise reach would be pure upside and a long-range turret would out-damage everything near it.
-    expect(attackIntervalFor({ attackRange: 400 })).toBeGreaterThan(attackIntervalFor({ attackRange: 200 }));
+  it('takes its interval from attack speed, exactly as combat.ts does', () => {
+    /**
+     * This replaces a test that asserted a RANGE-based interval I had invented. It passed, which proved only that the
+     * invention was self-consistent — the scene has always used `1 / attackSpeed` via resetAttackCooldown, so the
+     * "shared" rule was not the rule being shared. Pinning it against the real formula is the point.
+     */
+    expect(attackIntervalFor({ attackSpeed: 0.8 })).toBeCloseTo(1 / 0.8, 9);
+    expect(attackIntervalFor({ attackSpeed: 2 })).toBeCloseTo(0.5, 9);
+    expect(attackIntervalFor({ attackSpeed: 0 }), 'no attack speed means never').toBe(Infinity);
+  });
+
+  it('respects the attacker attack speed when it fires', () => {
+    const fast = resolveAutoAttacks([turret({ attackSpeed: 2 })], [foe('e1', 100)], {}, 1 / 60, SPEED);
+    const slow = resolveAutoAttacks([turret({ attackSpeed: 0.5 })], [foe('e1', 100)], {}, 1 / 60, SPEED);
+    expect(slow.attackers[0].attackCdRemaining).toBeGreaterThan(fast.attackers[0].attackCdRemaining);
   });
 
   it('is deterministic and does not mutate its inputs', () => {
