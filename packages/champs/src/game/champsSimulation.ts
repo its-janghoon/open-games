@@ -421,10 +421,13 @@ export function createChampsSimulation(
        */
       const sprung = resolveTraps(
         next.traps,
-        next.units
-          .filter((u) => !u.dead)
-          .map((u) => ({ id: u.id, pos: u.pos, damageable: true })),
+        next.units.filter((u) => !u.dead).map((u) => ({ id: u.id, pos: u.pos })),
         next.simTime,
+        // Hostility judged per trap, from the trap's own owner — a flat flag cannot serve two teams' traps at once.
+        (trap, candidate) => {
+          const victim = next.units.find((u) => u.id === candidate.id);
+          return Boolean(victim && areHostile(victim.team, trap.sourceTeam));
+        },
       );
       next.traps = sprung.traps;
       for (const trigger of sprung.triggers) {

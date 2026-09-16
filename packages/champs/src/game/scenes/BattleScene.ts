@@ -177,7 +177,8 @@ import {
 import { composeTeams, enemyFacingSlot } from '../rift/teams';
 import { resolveAutoAttacks, type AutoAttacker } from '../rift/autoAttack';
 import { planCast, type CastActor } from '../rift/abilityEffects';
-import { trapIdFor } from '../rift/traps';
+import { advanceBaron, advanceBuffs, advanceWardenCharges } from '../rift/fieldState';
+import { resolveTraps, trapIdFor } from '../rift/traps';
 import type { TargetTable } from '../rift/minionCombat';
 import {
   computeEffectiveStats,
@@ -187,7 +188,6 @@ import {
 import { totalModifiers } from '../../data/items';
 import {
   createBuffState,
-  expireBuffs,
   applyBuff,
   BUFF_EFFECTS,
   CAMPS,
@@ -198,7 +198,6 @@ import {
   addModifiers,
   applyBaronBuff,
   dragonStackBonus,
-  expireBaronBuff,
   heraldReward,
   monsterStats,
   noBaronBuff,
@@ -2185,15 +2184,30 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private tickBuffsAndObjectives() {
-    // expireBuffs is now non-mutating, so the result MUST be assigned back or buffs never lapse.
-    this.playerBuffs = expireBuffs(this.playerBuffs, this.elapsed);
+    /**
+     * Buff and tyrant expiry through the extracted record steps, so the scene and the snapshot run the SAME expiry.
+     *
+     * The player is keyed 'player' rather than by unit id because the human's buffs live on a scene field, not on a bot
+     * state — a detail worth naming, since keying it by unit id would collide the day the player's id is reused.
+     */
+    const expired = advanceBuffs(
+      {
+        player: this.playerBuffs,
+        ...Object.fromEntries(
+          this.champions.filter((c) => c.bot).map((c) => [c.unit.id, c.bot!.buffs]),
+        ),
+      },
+      this.elapsed,
+    );
+    this.playerBuffs = expired.player;
     for (const champion of this.champions) {
-      if (champion.bot) champion.bot.buffs = expireBuffs(champion.bot.buffs, this.elapsed);
+      if (champion.bot) champion.bot.buffs = expired[champion.unit.id] ?? champion.bot.buffs;
     }
     const allyWasActive = this.allyBaron.active;
     const enemyWasActive = this.enemyBaron.active;
-    this.allyBaron = expireBaronBuff(this.allyBaron, this.elapsed);
-    this.enemyBaron = expireBaronBuff(this.enemyBaron, this.elapsed);
+    const baron = advanceBaron({ ally: this.allyBaron, enemy: this.enemyBaron }, this.elapsed);
+    this.allyBaron = baron.ally;
+    this.enemyBaron = baron.enemy;
     if (allyWasActive !== this.allyBaron.active) this.applyTeamChampionStats('ally');
     if (enemyWasActive !== this.enemyBaron.active) this.applyTeamChampionStats('enemy');
     for (const runtime of this.camps) {
@@ -3222,30 +3236,58 @@ export default class BattleScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * One tick of every armed trap, through the SHARED extracted step.
+   *
+   * rift/traps.ts was written FROM this code, which means there were two copies of the same rule and only one of them was
+   * in the snapshot. This is the commit that makes there be one. The scene keeps the damage application, the colour and
+   * its own richer trap record; what it delegates is which trap catches whom, and when a trap has lapsed.
+   *
+   * `this.traps.sort(...)` also went away. Array.prototype.sort mutates IN PLACE, so iterating `this.traps.sort(...)`
+   * reordered the scene's own field as a side effect of reading it — harmless while the comparator was total, and not
+   * something to leave standing.
+   */
   private tickTraps(): void {
-    const active: TrapRuntime[] = [];
-    for (const trap of this.traps.sort((a, b) => a.id.localeCompare(b.id))) {
-      if (trap.expiresAt <= this.elapsed) continue;
-      const target = this.allEntities
-        .filter(
-          (candidate) =>
-            candidate.unit.kind !== 'turret' &&
-            candidate.unit.kind !== 'nexus' &&
-            this.canDamageTarget(trap.source, candidate) &&
-            distance(candidate.unit.pos, trap.point) <= trap.radius,
-        )
-        .sort((a, b) => distance(a.unit.pos, trap.point) - distance(b.unit.pos, trap.point) || a.unit.id.localeCompare(b.unit.id))[0];
-      if (!target) {
-        active.push(trap);
-        continue;
-      }
-      this.applyTargetedDamage(trap.source, target, trap.rawDamage, trap.color, {
-        ability: true,
+    if (this.traps.length === 0) return;
+    const byId = new Map(this.traps.map((trap) => [trap.id, trap]));
+    const bodies = this.allEntities.filter(
+      (candidate) => candidate.unit.kind !== 'turret' && candidate.unit.kind !== 'nexus',
+    );
+    const entityById = new Map(bodies.map((e) => [e.unit.id, e]));
+
+    const result = resolveTraps(
+      this.traps.map((trap) => ({
+        id: trap.id,
+        sourceId: trap.source.id,
+        sourceTeam: trap.source.team,
+        point: trap.point,
+        radius: trap.radius,
+        rawDamage: trap.rawDamage,
+        expiresAt: trap.expiresAt,
         slowPercent: trap.slowPercent,
         slowDuration: trap.slowDuration,
+      })),
+      bodies.map((e) => ({ id: e.unit.id, pos: e.unit.pos })),
+      this.elapsed,
+      // Judged per TRAP, using that trap's own source — which is why the step takes a callback rather than a flag.
+      (trapState, candidate) => {
+        const trap = byId.get(trapState.id);
+        const entity = entityById.get(candidate.id);
+        return Boolean(trap && entity && this.canDamageTarget(trap.source, entity));
+      },
+    );
+
+    for (const trigger of result.triggers) {
+      const trap = byId.get(trigger.trapId);
+      const target = entityById.get(trigger.targetId);
+      if (!trap || !target) continue;
+      this.applyTargetedDamage(trap.source, target, trigger.rawDamage, trap.color, {
+        ability: true,
+        slowPercent: trigger.slowPercent,
+        slowDuration: trigger.slowDuration,
       });
     }
-    this.traps = active;
+    this.traps = result.traps.map((survivor) => byId.get(survivor.id)).filter((t): t is TrapRuntime => Boolean(t));
   }
 
   private syncTrapVisuals(): void {
@@ -3743,10 +3785,12 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private tickHeldWardenPolicy(): void {
-    for (const side of ['ally', 'enemy'] as MapSide[]) {
-      const charge = this.wardenCharge[side];
-      if (charge && this.elapsed >= charge.expiresAt) this.wardenCharge[side] = null;
-    }
+    // Expiry through the extracted step, deliberately separate from deciding whether to SPEND a charge: a lapse has to
+    // happen on ticks where nothing wants to deploy.
+    this.wardenCharge = advanceWardenCharges(
+      { ally: this.wardenCharge.ally, enemy: this.wardenCharge.enemy },
+      this.elapsed,
+    );
     const charge = this.wardenCharge.enemy;
     const targets = this.wardenTargets('enemy');
     const target = targets[0];

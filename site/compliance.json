@@ -41,15 +41,15 @@
       "promise": "The games stay small enough for a metered connection, and cannot quietly grow.",
       "checkedBy": "check:budget, gzipped bytes per game per asset class against committed ceilings.",
       "verdict": "pass",
-      "measured": "First wait 161.4–394.9 KB; full download 343.8–1656.4 KB.",
+      "measured": "First wait 161.4–394.9 KB; full download 343.8–1656.8 KB.",
       "games": [
         {
           "slug": "champs",
           "firstWaitKB": 161.4,
-          "totalKB": 1656.4,
+          "totalKB": 1656.8,
           "byClassKB": {
             "font": 1101.9,
-            "js": 476.9,
+            "js": 477.2,
             "image": 59.7,
             "css": 14,
             "other": 2.3,

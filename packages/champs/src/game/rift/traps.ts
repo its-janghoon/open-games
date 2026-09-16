@@ -45,8 +45,6 @@ export interface TrapResult {
 export interface TrapCandidate {
   id: string;
   pos: Vec2;
-  /** Whether this trap's owner may damage this candidate — the caller decides, since it owns team and shield rules. */
-  damageable: boolean;
 }
 
 export function cloneTraps(traps: readonly TrapState[]): TrapState[] {
@@ -63,11 +61,17 @@ export function cloneTraps(traps: readonly TrapState[]): TrapState[] {
  *
  * Traps are processed in id order and each picks its nearest candidate with an id tiebreak. Both orders matter for the
  * same reason: array position is not something two peers can be relied on to agree about.
+ *
+ * `canDamage` is a CALLBACK taking the trap AND the candidate. It began as a flat `damageable` boolean on each candidate,
+ * and adopting this step in BattleScene is what exposed that as wrong: damageability depends on the trap's OWNER, so with
+ * two traps from opposing teams a single flag per candidate cannot serve both — one team's trap would inherit the other's
+ * judgement. Team and shield rules stay with the caller either way; only the shape changed.
  */
 export function resolveTraps(
   traps: readonly TrapState[],
   candidates: readonly TrapCandidate[],
   now: number,
+  canDamage: (trap: TrapState, candidate: TrapCandidate) => boolean,
 ): TrapResult {
   const survivors: TrapState[] = [];
   const triggers: TrapTrigger[] = [];
@@ -76,7 +80,10 @@ export function resolveTraps(
     if (trap.expiresAt <= now) continue;
 
     const caught = candidates
-      .filter((candidate) => candidate.damageable && distance(candidate.pos, trap.point) <= trap.radius)
+      .filter(
+        (candidate) =>
+          canDamage(trap, candidate) && distance(candidate.pos, trap.point) <= trap.radius,
+      )
       .sort(
         (a, b) =>
           distance(a.pos, trap.point) - distance(b.pos, trap.point) || a.id.localeCompare(b.id),
