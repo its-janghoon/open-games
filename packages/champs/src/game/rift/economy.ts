@@ -61,11 +61,22 @@ export interface XpResult {
 }
 
 /**
+ * A champion's progression WITHOUT its gold.
+ *
+ * Introduced when BattleScene's gold moved into `WorldState.economy`: gold now has exactly one home, so the scene's
+ * progression object must not carry a second copy of it. Narrowing what `addXp` accepts is what makes that impossible
+ * rather than merely discouraged — a mirror field nothing writes is a stale number waiting to be read.
+ *
+ * `ProgressState` still satisfies this, so every existing caller and test is unaffected.
+ */
+export type ChampionLevel = Pick<ProgressState, 'level' | 'xp'>;
+
+/**
  * Grant `amount` XP to a progression state, promoting through as many level
  * thresholds as the total XP allows, capping at {@link MAX_LEVEL}. Mutates the
  * state in place and returns whether any level-up happened and the new level.
  */
-export function addXp(state: ProgressState, amount: number): XpResult {
+export function addXp(state: ChampionLevel, amount: number): XpResult {
   const startLevel = state.level;
   if (amount > 0) {
     state.xp += amount;

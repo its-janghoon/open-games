@@ -71,7 +71,7 @@ import {
   resolveMatch,
   type MatchResolution,
 } from '../matchResolution';
-import { isDecided, RECALL_SECONDS } from '../rift/matchFlow';
+import { isDecided, RECALL_SECONDS, teamGold } from '../rift/matchFlow';
 import {
   DIFFICULTY_CONFIG,
   type Difficulty,
@@ -166,12 +166,11 @@ import {
   type MinionType,
 } from '../rift/minions';
 import {
-  createProgress,
-  addGold,
+  type ChampionLevel,
+  type GoldState,
+  STARTING_GOLD,
   addXp,
   advanceGold,
-  STARTING_GOLD,
-  type ProgressState,
 } from '../rift/economy';
 import { composeTeams, enemyFacingSlot } from '../rift/teams';
 import { resolveAutoAttacks, type AutoAttacker } from '../rift/autoAttack';
@@ -488,11 +487,9 @@ const VISION_RADIUS_STRUCTURE = 230;
 interface BotState {
   champion: Champion;
   side: MapSide;
-  progress: ProgressState;
+  progress: ChampionLevel;
   ownedItems: string[];
   buffs: BuffState;
-  goldAccrual: number;
-  totalGoldEarned: number;
   currentIntent: AiIntent;
   pendingIntent: AiIntent | null;
   intentReadyAt: number;
@@ -673,7 +670,7 @@ export default class BattleScene extends Phaser.Scene {
 
   // Economy / progression. Each AI bot carries its own ProgressState; this is
   // the human player's.
-  private playerProgress: ProgressState = createProgress();
+  private playerProgress: ChampionLevel = { level: 1, xp: 0 };
   private ownedItems: string[] = [];
   /**
    * Observations of the human's own decisions, for learning their ghost. Bounded by
@@ -686,8 +683,6 @@ export default class BattleScene extends Phaser.Scene {
    * and a base32 decode inside the simulation loop, several times a second per bot.
    */
   private opponentGhost: GhostPolicy | null = null;
-  private goldAccrual = 0;
-  private playerTotalGoldEarned = STARTING_GOLD;
   private playerDeaths = 0;
 
   /**
@@ -698,10 +693,6 @@ export default class BattleScene extends Phaser.Scene {
    * and two copies of a running total is how they end up disagreeing. It stays a scene field until `economy` is adopted,
    * at which point this becomes a call to `teamGold()` and disappears rather than being migrated.
    */
-  private teamGoldEarned: Record<MapSide, number> = {
-    ally: STARTING_GOLD * 5,
-    enemy: STARTING_GOLD * 5,
-  };
 
   // Buffs / objectives (ally-team perspective drives HUD + player stats).
   private playerBuffs: BuffState = createBuffState();
@@ -887,12 +878,9 @@ export default class BattleScene extends Phaser.Scene {
     this.world = createAdoptedWorld();
     this.structureById.clear();
     this.structureLines = [];
-    this.playerProgress = createProgress(STARTING_GOLD);
+    this.playerProgress = { level: 1, xp: 0 };
     this.ownedItems = [];
-    this.goldAccrual = 0;
-    this.playerTotalGoldEarned = STARTING_GOLD;
     this.playerDeaths = 0;
-    this.teamGoldEarned = { ally: STARTING_GOLD * 5, enemy: STARTING_GOLD * 5 };
     this.playerBuffs = createBuffState();
     this.world.baron.ally = noBaronBuff();
     this.world.baron.enemy = noBaronBuff();
@@ -1297,11 +1285,9 @@ export default class BattleScene extends Phaser.Scene {
           entity.bot = {
             champion: slot.champion,
             side,
-            progress: createProgress(STARTING_GOLD),
+            progress: { level: 1, xp: 0 },
             ownedItems: [],
             buffs: createBuffState(),
-            goldAccrual: 0,
-            totalGoldEarned: STARTING_GOLD,
             currentIntent: 'approach',
             pendingIntent: null,
             intentReadyAt: 0,
@@ -2240,6 +2226,36 @@ export default class BattleScene extends Phaser.Scene {
     return fresh;
   }
 
+  /**
+   * This entity's gold, from the one Record the snapshot carries.
+   *
+   * Seeded `{ gold: STARTING_GOLD, accrual: 0, totalEarned: STARTING_GOLD }` and NOT with `initialGold`, which sets
+   * `totalEarned: 0`. The scene has always counted the starting purse as earned — the result screen and the hard-cap
+   * score both read it that way — so seeding it at zero here would quietly rewrite every match's reported gold.
+   */
+  private economyFor(entity: Entity): GoldState {
+    const existing = this.world.economy[entity.unit.id];
+    if (existing) return existing;
+    const fresh: GoldState = { gold: STARTING_GOLD, accrual: 0, totalEarned: STARTING_GOLD };
+    this.world.economy[entity.unit.id] = fresh;
+    return fresh;
+  }
+
+  /**
+   * Gold earned by a side, DERIVED rather than accumulated.
+   *
+   * This replaces a running `teamGoldEarned` total the scene kept beside the per-champion ones. It is exactly
+   * `teamGold`'s sum because every gain already updated both -- passive income in `tickEconomy` and bounties in
+   * `awardBounty` -- so the second total was a copy that could only ever drift. rift/matchFlow.ts said as much when it
+   * declined to make gold a `TeamFacts` field.
+   */
+  private goldEarnedBy(side: MapSide): number {
+    return teamGold(
+      this.world.economy,
+      this.champions.filter((entity) => (entity.bot?.side ?? 'ally') === side).map((entity) => entity.unit.id),
+    );
+  }
+
   /** Refill to the current maximum — spawn and respawn. */
   private fillResource(entity: Entity): void {
     const resource = this.resourceFor(entity);
@@ -2310,42 +2326,22 @@ export default class BattleScene extends Phaser.Scene {
      * its own storage (`goldAccrual` beside `playerProgress`, and the bot's own fields) because BattleScene is still
      * the authority for a real match; what it no longer keeps is its own copy of the maths.
      */
-    const player = advanceGold(
-      {
-        gold: this.playerProgress.gold,
-        accrual: this.goldAccrual,
-        totalEarned: this.playerTotalGoldEarned,
-      },
-      dt,
-    );
-    const playerGained = player.totalEarned - this.playerTotalGoldEarned;
-    this.playerProgress.gold = player.gold;
-    this.goldAccrual = player.accrual;
-    this.playerTotalGoldEarned = player.totalEarned;
-    this.teamGoldEarned.ally += playerGained;
+    this.world.economy[this.player.unit.id] = advanceGold(this.economyFor(this.player), dt);
 
     for (const entity of this.champions) {
       const bot = entity.bot;
       if (!bot) continue;
-      const advanced = advanceGold(
-        { gold: bot.progress.gold, accrual: bot.goldAccrual, totalEarned: bot.totalGoldEarned },
-        dt,
-      );
-      const gained = advanced.totalEarned - bot.totalGoldEarned;
-      bot.progress.gold = advanced.gold;
-      bot.goldAccrual = advanced.accrual;
-      bot.totalGoldEarned = advanced.totalEarned;
-      this.teamGoldEarned[bot.side] += gained;
+      this.world.economy[entity.unit.id] = advanceGold(this.economyFor(entity), dt);
       if (!this.inBase(entity.unit, bot.side) || !isChampionPresent(entity.life!)) continue;
-      const item = recommendPurchase(bot.champion.role, bot.progress.gold, bot.ownedItems);
+      const item = recommendPurchase(bot.champion.role, this.economyFor(entity).gold, bot.ownedItems);
       if (!item) continue;
       const purchase = attemptPurchase({
-        gold: bot.progress.gold,
+        gold: this.economyFor(entity).gold,
         items: bot.ownedItems,
         inShop: true,
       }, item.id);
       if (!purchase.accepted) continue;
-      bot.progress.gold = purchase.gold;
+      this.economyFor(entity).gold = purchase.gold;
       bot.ownedItems = purchase.items;
       this.applyChampionStats(entity, bot.side);
     }
@@ -2410,7 +2406,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private processPurchase(id: string) {
     const result = attemptPurchase({
-      gold: this.playerProgress.gold,
+      gold: this.economyFor(this.player).gold,
       items: this.ownedItems,
       inShop: this.inBase(this.player.unit, 'ally'),
     }, id);
@@ -2421,7 +2417,7 @@ export default class BattleScene extends Phaser.Scene {
       sequence: ++this.purchaseFeedbackSequence,
     };
     if (!result.accepted) return;
-    this.playerProgress.gold = result.gold;
+    this.economyFor(this.player).gold = result.gold;
     this.ownedItems = result.items;
     this.recordLearning('recall-shop');
     this.applyChampionStats(this.player, 'ally');
@@ -2740,7 +2736,9 @@ export default class BattleScene extends Phaser.Scene {
     resource: number;
     maxResource: number;
     cds: CooldownState;
-    progress: ProgressState;
+    progress: ChampionLevel;
+    /** Held gold, from `world.economy`. Exposed here so no caller has to know which of the two paths it is on. */
+    gold: number;
     ownedItems: string[];
     side: MapSide;
   } {
@@ -2751,6 +2749,7 @@ export default class BattleScene extends Phaser.Scene {
         maxResource: this.resourceFor(entity).max,
         cds: this.cooldownsFor(entity),
         progress: this.playerProgress,
+        gold: this.economyFor(entity).gold,
         ownedItems: this.ownedItems,
         // The human is always the ally side in a local match.
         side: 'ally',
@@ -2763,6 +2762,7 @@ export default class BattleScene extends Phaser.Scene {
       maxResource: this.resourceFor(entity).max,
       cds: this.cooldownsFor(entity),
       progress: bot.progress,
+      gold: this.economyFor(entity).gold,
       ownedItems: bot.ownedItems,
       side: bot.side,
     };
@@ -2782,7 +2782,7 @@ export default class BattleScene extends Phaser.Scene {
     const alliedWave = nearbyMinions.filter((entity) => entity.unit.team === u.team).length;
     const hostileWave = nearbyMinions.filter((entity) => areHostile(u.team, entity.unit.team)).length;
     const waveTotal = Math.max(1, alliedWave + hostileWave);
-    const build = recommendBuild(state.champion.role, state.ownedItems, state.progress.gold);
+    const build = recommendBuild(state.champion.role, state.ownedItems, state.gold);
     const nextPurchaseCost = build?.nextPurchasableComponent?.cost ?? build?.remainingCost;
     const objectivePressure = this.objectives.some(
       (objective) =>
@@ -2825,7 +2825,7 @@ export default class BattleScene extends Phaser.Scene {
         objectivePressure,
         nearbyAllies: nearbyChampions.filter((entity) => entity.unit.team === u.team).length,
         nearbyEnemies: nearbyChampions.filter((entity) => areHostile(u.team, entity.unit.team)).length,
-        gold: state.progress.gold,
+        gold: state.gold,
         nextPurchaseCost,
         shopAvailable: this.inBase(u, state.side),
       },
@@ -3909,12 +3909,13 @@ export default class BattleScene extends Phaser.Scene {
     if (!entity || entity.unit.kind !== 'champion') return;
     const progress = entity === this.player ? this.playerProgress : entity.bot?.progress;
     if (!progress) return;
-    addGold(progress, bounty.gold);
+    // Bounty gold counts as EARNED as well as held, which is why the derived team total agrees with the per-champion one.
+    const purse = this.economyFor(entity);
+    if (bounty.gold > 0) {
+      purse.gold += bounty.gold;
+      purse.totalEarned += bounty.gold;
+    }
     const xp = addXp(progress, bounty.xp);
-    const side: MapSide = entity.bot?.side ?? 'ally';
-    this.teamGoldEarned[side] += bounty.gold;
-    if (entity === this.player) this.playerTotalGoldEarned += bounty.gold;
-    else if (entity.bot) entity.bot.totalGoldEarned += bounty.gold;
     if (xp.leveled) {
       if (entity === this.player) this.recordLearning('level-up');
       this.floatingDamage(entity.unit.pos, xp.newLevel, 0xffd45c, 'LV ');
@@ -4705,7 +4706,7 @@ export default class BattleScene extends Phaser.Scene {
       allyNexusPct: this.allyNexus ? this.allyNexus.unit.hp / this.allyNexus.unit.maxHp : 1,
       enemyNexusPct: this.enemyNexus ? this.enemyNexus.unit.hp / this.enemyNexus.unit.maxHp : 1,
       elapsed: this.world.simTime,
-      gold: Math.floor(this.playerProgress.gold),
+      gold: Math.floor(this.economyFor(this.player).gold),
       level: this.playerProgress.level,
       xpPct,
       xpCapped: this.playerProgress.level >= 18,
@@ -4840,7 +4841,7 @@ export default class BattleScene extends Phaser.Scene {
       structuresTotal: this.mode === 'conquest' ? 9 : 3,
       championKills: facts.championKills,
       objectivePoints: facts.objectivePoints,
-      gold: this.teamGoldEarned[side],
+      gold: this.goldEarnedBy(side),
     };
   }
 
@@ -4943,7 +4944,7 @@ export default class BattleScene extends Phaser.Scene {
       playerChampionId: this.playerChampion.id,
       enemyChampionId: this.enemyChampion.id,
       deaths: this.playerDeaths,
-      totalGoldEarned: Math.floor(this.playerTotalGoldEarned),
+      totalGoldEarned: Math.floor(this.economyFor(this.player).totalEarned),
       objectives: this.world.teamFacts.ally.epicMonstersKilled,
       objectivePoints: this.world.teamFacts.ally.objectivePoints,
       ownedItems: [...this.ownedItems],
@@ -4955,7 +4956,7 @@ export default class BattleScene extends Phaser.Scene {
         minionKills: this.stats.minionKills,
         damageDealt: Math.round(this.stats.damageDealt),
         level: this.playerProgress.level,
-        gold: Math.floor(this.playerProgress.gold),
+        gold: Math.floor(this.economyFor(this.player).gold),
       },
     };
     this.time.delayedCall(400, () => this.onGameEnd(outcome));
