@@ -215,6 +215,13 @@ import { attemptPurchase } from '../inventory';
 import { addTravelled, openDashWindow, passiveKeys } from '../rift/passives';
 import { scheduleDueWaves } from '../rift/waveSchedule';
 import {
+  canAfford,
+  initialResource,
+  regenerateResource,
+  spendResource,
+  type ResourceState,
+} from '../rift/resources';
+import {
   createLearningState,
   currentLearningStep,
   learningRequirementsCompleted,
@@ -323,7 +330,6 @@ const INHIBITOR_HP = 2400;
 const TURRET_RANGE = 260;
 const TURRET_DAMAGE = 152;
 const TURRET_ATTACK_SPEED = 0.83;
-const RESOURCE_REGEN = 8; // per second
 const SIMULATION_TICK_SECONDS = 1 / 60;
 const MAX_STEPS_PER_RENDER = 12;
 const HUD_INTERVAL_SECONDS = 0.1;
@@ -340,6 +346,11 @@ const MAX_LIVE_MINIONS_PER_SIDE_LANE = 24;
 const WAVE_SPAWN_RETRY_SECONDS = 0.75;
 const CRITICAL_TEXTURE_TIMEOUT_MS = 2500;
 const CHAMPION_DEATH_POSE_MS = 420;
+
+/** The base ability pool every champion starts from, before item and buff bonuses. */
+const BASE_RESOURCE_POOL = 300;
+/** Fountain top-up, as a fraction of the pool per second. Distinct from the baseline regen rate, which resources.ts owns. */
+const FOUNTAIN_RESOURCE_FRACTION = 0.08;
 
 const CHAMPION_POSE_HOLD_MS = {
   attack: 180,
@@ -477,8 +488,6 @@ const VISION_RADIUS_STRUCTURE = 230;
 interface BotState {
   champion: Champion;
   side: MapSide;
-  resource: number;
-  maxResource: number;
   progress: ProgressState;
   ownedItems: string[];
   buffs: BuffState;
@@ -661,8 +670,6 @@ export default class BattleScene extends Phaser.Scene {
 
   private structureLines: StructureLine[] = [];
 
-  private playerResource = 0;
-  private playerMaxResource = 300;
 
   // Economy / progression. Each AI bot carries its own ProgressState; this is
   // the human player's.
@@ -880,7 +887,6 @@ export default class BattleScene extends Phaser.Scene {
     this.world = createAdoptedWorld();
     this.structureById.clear();
     this.structureLines = [];
-    this.playerResource = this.playerMaxResource;
     this.playerProgress = createProgress(STARTING_GOLD);
     this.ownedItems = [];
     this.goldAccrual = 0;
@@ -1291,8 +1297,6 @@ export default class BattleScene extends Phaser.Scene {
           entity.bot = {
             champion: slot.champion,
             side,
-            resource: 300,
-            maxResource: 300,
             progress: createProgress(STARTING_GOLD),
             ownedItems: [],
             buffs: createBuffState(),
@@ -1310,7 +1314,7 @@ export default class BattleScene extends Phaser.Scene {
         this.champions.push(entity);
         this.applyChampionStats(entity, side);
         entity.unit.hp = entity.unit.maxHp;
-        if (entity.bot) entity.bot.resource = entity.bot.maxResource;
+        if (entity.bot) this.fillResource(entity);
       }
     }
   }
@@ -1781,9 +1785,9 @@ export default class BattleScene extends Phaser.Scene {
     entity.hpRegen = eff.hpRegen;
     entity.abilityPower = eff.abilityPower;
     if (isHuman) {
-      this.playerMaxResource = 300 + eff.resource;
+      this.resourceFor(this.player).max = BASE_RESOURCE_POOL + eff.resource;
     } else {
-      entity.bot!.maxResource = 300 + eff.resource;
+      this.resourceFor(entity).max = BASE_RESOURCE_POOL + eff.resource;
     }
   }
 
@@ -2020,13 +2024,13 @@ export default class BattleScene extends Phaser.Scene {
     this.reviveInhibitors();
     tickCooldowns(this.cooldownsFor(this.player), dt);
     const blueRegen = this.blueBuffRegen();
-    this.playerResource = Math.min(this.playerMaxResource, this.playerResource + (RESOURCE_REGEN + blueRegen) * dt);
+    this.world.resources[this.player.unit.id] = regenerateResource(this.resourceFor(this.player), dt, blueRegen);
     for (const c of this.champions) {
       if (!c.bot) continue;
       tickCooldowns(this.cooldownsFor(c), dt);
       const botBlueRegen = c.bot.buffs.buffs.some((buff) => buff.kind === 'blue')
         ? BUFF_EFFECTS.blue.resourceRegenPerSecond : 0;
-      c.bot.resource = Math.min(c.bot.maxResource, c.bot.resource + (RESOURCE_REGEN + botBlueRegen) * dt);
+      this.world.resources[c.unit.id] = regenerateResource(this.resourceFor(c), dt, botBlueRegen);
     }
 
     this.tickEconomy(dt);
@@ -2219,6 +2223,49 @@ export default class BattleScene extends Phaser.Scene {
     const fresh = createCooldownState();
     this.world.cooldowns[entity.unit.id] = fresh;
     return fresh;
+  }
+
+  /**
+   * This entity's ability resource, from the one Record the snapshot carries.
+   *
+   * Lazily created like {@link cooldownsFor}, defaulting to the base pool. `max` is rewritten by `applyChampionStats`
+   * whenever items or buffs change it, so seeding a default here cannot fix a wrong maximum in place -- it only avoids a
+   * missing entry the first time an entity is asked about.
+   */
+  private resourceFor(entity: Entity): ResourceState {
+    const existing = this.world.resources[entity.unit.id];
+    if (existing) return existing;
+    const fresh = initialResource(BASE_RESOURCE_POOL);
+    this.world.resources[entity.unit.id] = fresh;
+    return fresh;
+  }
+
+  /** Refill to the current maximum — spawn and respawn. */
+  private fillResource(entity: Entity): void {
+    const resource = this.resourceFor(entity);
+    this.world.resources[entity.unit.id] = { current: resource.max, max: resource.max };
+  }
+
+  /** Add and clamp. Used by the fountain, whose rate is a FRACTION of the pool rather than the baseline regen. */
+  private addResource(entity: Entity, amount: number): void {
+    const resource = this.resourceFor(entity);
+    this.world.resources[entity.unit.id] = {
+      current: Math.min(resource.max, resource.current + amount),
+      max: resource.max,
+    };
+  }
+
+  /**
+   * Pay a cast's cost through the pure `spendResource`, which returns whether it was affordable ALONGSIDE the new state.
+   *
+   * The caller has already asked `canAfford`, so this cannot refuse in practice; going through the same function anyway
+   * keeps one definition of "spend" rather than a check here and a subtraction there, which is where an ability gets cast
+   * for free under a race.
+   */
+  private spend(entity: Entity, cost: number): boolean {
+    const { paid, resource } = spendResource(this.resourceFor(entity), cost);
+    if (paid) this.world.resources[entity.unit.id] = resource;
+    return paid;
   }
 
   private startRecall() {
@@ -2515,7 +2562,7 @@ export default class BattleScene extends Phaser.Scene {
       applyHeal(this.player.unit, (this.player.hpRegen ?? 0) * dt);
       if (this.inBase(this.player.unit, 'ally')) {
         applyHeal(this.player.unit, this.player.unit.maxHp * 0.08 * dt);
-        this.playerResource = Math.min(this.playerMaxResource, this.playerResource + this.playerMaxResource * 0.08 * dt);
+        this.addResource(this.player, this.resourceFor(this.player).max * FOUNTAIN_RESOURCE_FRACTION * dt);
       }
     }
     // Every AI champion regenerates from effective level/item stats, plus a
@@ -2525,7 +2572,7 @@ export default class BattleScene extends Phaser.Scene {
       applyHeal(c.unit, (c.hpRegen ?? 0) * dt);
       if (this.inBase(c.unit, c.bot.side)) {
         applyHeal(c.unit, c.unit.maxHp * 0.08 * dt);
-        c.bot.resource = Math.min(c.bot.maxResource, c.bot.resource + c.bot.maxResource * 0.08 * dt);
+        this.addResource(c, this.resourceFor(c).max * FOUNTAIN_RESOURCE_FRACTION * dt);
       }
     }
   }
@@ -2700,8 +2747,8 @@ export default class BattleScene extends Phaser.Scene {
     if (entity === this.player) {
       return {
         champion: this.playerChampion,
-        resource: this.playerResource,
-        maxResource: this.playerMaxResource,
+        resource: this.resourceFor(entity).current,
+        maxResource: this.resourceFor(entity).max,
         cds: this.cooldownsFor(entity),
         progress: this.playerProgress,
         ownedItems: this.ownedItems,
@@ -2712,8 +2759,8 @@ export default class BattleScene extends Phaser.Scene {
     const bot = entity.bot!;
     return {
       champion: bot.champion,
-      resource: bot.resource,
-      maxResource: bot.maxResource,
+      resource: this.resourceFor(entity).current,
+      maxResource: this.resourceFor(entity).max,
       cds: this.cooldownsFor(entity),
       progress: bot.progress,
       ownedItems: bot.ownedItems,
@@ -2949,8 +2996,8 @@ export default class BattleScene extends Phaser.Scene {
     const playerCds = this.cooldownsFor(this.player);
     this.castAbility(this.player, slot, aim, this.playerChampion, playerCds, () => {
       const cost = this.abilityBySlot(this.playerChampion, slot).cost;
-      if (this.playerResource < cost || playerCds[slot] > 0) return false;
-      this.playerResource -= cost;
+      if (!canAfford(this.resourceFor(this.player), cost) || playerCds[slot] > 0) return false;
+      this.spend(this.player, cost);
       return true;
     });
   }
@@ -3019,8 +3066,8 @@ export default class BattleScene extends Phaser.Scene {
     const cds = this.cooldownsFor(bot);
     this.castAbility(bot, slot, aim, state.champion, cds, () => {
       const cost = this.abilityBySlot(state.champion, slot).cost;
-      if (state.resource < cost || cds[slot] > 0) return false;
-      state.resource -= cost;
+      if (!canAfford(this.resourceFor(bot), cost) || cds[slot] > 0) return false;
+      this.spend(bot, cost);
       return true;
     });
   }
@@ -3324,9 +3371,9 @@ export default class BattleScene extends Phaser.Scene {
         entity.stunned = 0;
         entity.container.setVisible(true).setAlpha(1);
         entity.shadow?.setVisible(true).setAlpha(0.32);
-        if (entity === this.player) this.playerResource = this.playerMaxResource;
+        if (entity === this.player) this.fillResource(entity);
         if (entity.bot) {
-          entity.bot.resource = entity.bot.maxResource;
+          this.fillResource(entity);
           entity.bot.pushIndex = 0;
           entity.bot.currentIntent = 'approach';
           entity.bot.pendingIntent = null;
@@ -4651,8 +4698,8 @@ export default class BattleScene extends Phaser.Scene {
       enemyChampionId: this.enemyChampion.id,
       playerHp: Math.round(this.player.unit.hp),
       playerMaxHp: Math.round(this.player.unit.maxHp),
-      playerResource: Math.round(this.playerResource),
-      playerMaxResource: Math.round(this.playerMaxResource),
+      playerResource: Math.round(this.resourceFor(this.player).current),
+      playerMaxResource: Math.round(this.resourceFor(this.player).max),
       enemyHp: Math.round(this.enemy.unit.hp),
       enemyMaxHp: Math.round(this.enemy.unit.maxHp),
       allyNexusPct: this.allyNexus ? this.allyNexus.unit.hp / this.allyNexus.unit.maxHp : 1,

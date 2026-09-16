@@ -412,7 +412,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     ),
     minions: cloneMinions(state.minions),
     autoAttackers: cloneAutoAttackers(state.autoAttackers),
-    resources: cloneResources(state.resources),
     traps: cloneTraps(state.traps),
     camps: cloneCampSpawns(state.camps),
     campMembers: cloneCampMembers(state.campMembers),
@@ -467,6 +466,7 @@ export type AdoptedWorld = Pick<
   | 'recalls'
   | 'teamFacts'
   | 'cooldowns'
+  | 'resources'
 >;
 
 /** The adopted slice at match start. */
@@ -486,6 +486,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     recalls: {},
     teamFacts: createTeamFacts(),
     cooldowns: {},
+    resources: {},
   };
 }
 
@@ -516,6 +517,7 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     cooldowns: Object.fromEntries(
       Object.entries(world.cooldowns).map(([id, cds]) => [id, { ...cds }]),
     ),
+    resources: cloneResources(world.resources),
   };
 }
 
