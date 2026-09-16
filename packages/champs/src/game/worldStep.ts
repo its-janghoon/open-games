@@ -34,6 +34,7 @@ import type { BaronBuffState } from './rift/objectives';
 import type { WardenCharge } from './wardenPolicy';
 import {
   cloneTeamFacts,
+  createTeamFacts,
   ongoing,
   type MatchOutcome,
   type RecallTable,
@@ -413,7 +414,6 @@ export function cloneWorldState(state: WorldState): WorldState {
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
     minions: cloneMinions(state.minions),
-    teamFacts: cloneTeamFacts(state.teamFacts),
     autoAttackers: cloneAutoAttackers(state.autoAttackers),
     resources: cloneResources(state.resources),
     traps: cloneTraps(state.traps),
@@ -468,6 +468,7 @@ export type AdoptedWorld = Pick<
   | 'waves'
   | 'outcome'
   | 'recalls'
+  | 'teamFacts'
 >;
 
 /** The adopted slice at match start. */
@@ -485,6 +486,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     waves: initialWaveSchedule(),
     outcome: ongoing(),
     recalls: {},
+    teamFacts: createTeamFacts(),
   };
 }
 
@@ -511,6 +513,7 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     // into a snapshot the rollback still needs.
     outcome: { ...world.outcome },
     recalls: { ...world.recalls },
+    teamFacts: cloneTeamFacts(world.teamFacts),
   };
 }
 

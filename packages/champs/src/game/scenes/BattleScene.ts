@@ -583,12 +583,14 @@ interface ScheduledBattleCommand extends QueuedBattleCommand {
   targetTick: number;
 }
 
-interface TeamFacts {
-  championKills: number;
-  epicMonstersKilled: number;
-  objectivePoints: number;
-  totalGoldEarned: number;
-}
+/**
+ * The scene's own four-field `TeamFacts` interface is gone.
+ *
+ * It shadowed rift/matchFlow.ts's definition under the same name -- the four-field one here, the two-field one there --
+ * so assigning the scene's object to the pure type would have type-checked while silently dropping two fields into the
+ * snapshot. `epicMonstersKilled` moved INTO the pure type because it is authority; `totalGoldEarned` did not, because
+ * `teamGold()` derives it. See `teamGoldEarned` below.
+ */
 
 /**
  * The complete arena battle. Renders the three-lane Conquest map or the
@@ -683,9 +685,17 @@ export default class BattleScene extends Phaser.Scene {
   private playerTotalGoldEarned = STARTING_GOLD;
   private playerDeaths = 0;
 
-  private teamFacts: Record<MapSide, TeamFacts> = {
-    ally: { championKills: 0, epicMonstersKilled: 0, objectivePoints: 0, totalGoldEarned: STARTING_GOLD * 5 },
-    enemy: { championKills: 0, epicMonstersKilled: 0, objectivePoints: 0, totalGoldEarned: STARTING_GOLD * 5 },
+  /**
+   * Team gold earned, kept OUT of `world.teamFacts` on purpose.
+   *
+   * rift/matchFlow.ts says in as many words that gold is not a `TeamFacts` field: `teamGold()` sums it from the economy
+   * records instead. Storing a second copy in the snapshot would contradict a decision the pure layer made deliberately,
+   * and two copies of a running total is how they end up disagreeing. It stays a scene field until `economy` is adopted,
+   * at which point this becomes a call to `teamGold()` and disappears rather than being migrated.
+   */
+  private teamGoldEarned: Record<MapSide, number> = {
+    ally: STARTING_GOLD * 5,
+    enemy: STARTING_GOLD * 5,
   };
 
   // Buffs / objectives (ally-team perspective drives HUD + player stats).
@@ -879,10 +889,7 @@ export default class BattleScene extends Phaser.Scene {
     this.goldAccrual = 0;
     this.playerTotalGoldEarned = STARTING_GOLD;
     this.playerDeaths = 0;
-    this.teamFacts = {
-      ally: { championKills: 0, epicMonstersKilled: 0, objectivePoints: 0, totalGoldEarned: STARTING_GOLD * 5 },
-      enemy: { championKills: 0, epicMonstersKilled: 0, objectivePoints: 0, totalGoldEarned: STARTING_GOLD * 5 },
-    };
+    this.teamGoldEarned = { ally: STARTING_GOLD * 5, enemy: STARTING_GOLD * 5 };
     this.playerBuffs = createBuffState();
     this.world.baron.ally = noBaronBuff();
     this.world.baron.enemy = noBaronBuff();
@@ -2256,7 +2263,7 @@ export default class BattleScene extends Phaser.Scene {
     this.playerProgress.gold = player.gold;
     this.goldAccrual = player.accrual;
     this.playerTotalGoldEarned = player.totalEarned;
-    this.teamFacts.ally.totalGoldEarned += playerGained;
+    this.teamGoldEarned.ally += playerGained;
 
     for (const entity of this.champions) {
       const bot = entity.bot;
@@ -2269,7 +2276,7 @@ export default class BattleScene extends Phaser.Scene {
       bot.progress.gold = advanced.gold;
       bot.goldAccrual = advanced.accrual;
       bot.totalGoldEarned = advanced.totalEarned;
-      this.teamFacts[bot.side].totalGoldEarned += gained;
+      this.teamGoldEarned[bot.side] += gained;
       if (!this.inBase(entity.unit, bot.side) || !isChampionPresent(entity.life!)) continue;
       const item = recommendPurchase(bot.champion.role, bot.progress.gold, bot.ownedItems);
       if (!item) continue;
@@ -3765,7 +3772,7 @@ export default class BattleScene extends Phaser.Scene {
       if (targetEntity === this.player) this.playerDeaths += 1;
       // Payout through the pure step, so the tally and the bounty cannot disagree about whether this kill counted.
       const outcome = resolveKill({ victimKind: 'champion', killerSide: sourceSide });
-      this.teamFacts[sourceSide ?? 'ally'].championKills += outcome.championKillDelta;
+      this.world.teamFacts[sourceSide ?? 'ally'].championKills += outcome.championKillDelta;
       this.awardBounty(sourceEntity, outcome.bounty);
       if (source.id === 'player') this.stats.championKills += 1;
     } else if (target.kind === 'minion') {
@@ -3808,8 +3815,8 @@ export default class BattleScene extends Phaser.Scene {
     } else if (target.kind === 'monster' && targetEntity?.objectiveId && sourceSide) {
       const objectiveId = targetEntity.objectiveId;
       this.awardBounty(sourceEntity, monsterStats(objectiveId).bounty);
-      this.teamFacts[sourceSide].epicMonstersKilled += 1;
-      this.teamFacts[sourceSide].objectivePoints += objectiveId === 'dragon' ? 1 : objectiveId === 'herald' ? 2 : 3;
+      this.world.teamFacts[sourceSide].epicMonstersKilled += 1;
+      this.world.teamFacts[sourceSide].objectivePoints += objectiveId === 'dragon' ? 1 : objectiveId === 'herald' ? 2 : 3;
       const runtime = this.objectives.find((objective) => objective.id === objectiveId);
       if (runtime) {
         runtime.entity = null;
@@ -3844,7 +3851,7 @@ export default class BattleScene extends Phaser.Scene {
     addGold(progress, bounty.gold);
     const xp = addXp(progress, bounty.xp);
     const side: MapSide = entity.bot?.side ?? 'ally';
-    this.teamFacts[side].totalGoldEarned += bounty.gold;
+    this.teamGoldEarned[side] += bounty.gold;
     if (entity === this.player) this.playerTotalGoldEarned += bounty.gold;
     else if (entity.bot) entity.bot.totalGoldEarned += bounty.gold;
     if (xp.leveled) {
@@ -4664,7 +4671,7 @@ export default class BattleScene extends Phaser.Scene {
       objectives: this.buildObjectives(),
       ...(this.armedAbility ? { aimingSlot: this.armedAbility } : {}),
       dragonStacks: this.world.dragonStacks.ally,
-      objectivePoints: this.teamFacts.ally.objectivePoints,
+      objectivePoints: this.world.teamFacts.ally.objectivePoints,
       wardenChargeSeconds: Math.max(
         0,
         Math.ceil((this.world.wardenCharges.ally?.expiresAt ?? this.world.simTime) - this.world.simTime),
@@ -4764,7 +4771,7 @@ export default class BattleScene extends Phaser.Scene {
       (structure) => structure.unit.team === side && structure.node && countedKinds.has(structure.node.kind),
     );
     const nexus = side === 'ally' ? this.allyNexus : this.enemyNexus;
-    const facts = this.teamFacts[side];
+    const facts = this.world.teamFacts[side];
     return {
       nexusHp: nexus?.unit.hp ?? 0,
       nexusMaxHp: nexus?.unit.maxHp ?? NEXUS_HP,
@@ -4772,7 +4779,7 @@ export default class BattleScene extends Phaser.Scene {
       structuresTotal: this.mode === 'conquest' ? 9 : 3,
       championKills: facts.championKills,
       objectivePoints: facts.objectivePoints,
-      gold: facts.totalGoldEarned,
+      gold: this.teamGoldEarned[side],
     };
   }
 
@@ -4876,8 +4883,8 @@ export default class BattleScene extends Phaser.Scene {
       enemyChampionId: this.enemyChampion.id,
       deaths: this.playerDeaths,
       totalGoldEarned: Math.floor(this.playerTotalGoldEarned),
-      objectives: this.teamFacts.ally.epicMonstersKilled,
-      objectivePoints: this.teamFacts.ally.objectivePoints,
+      objectives: this.world.teamFacts.ally.epicMonstersKilled,
+      objectivePoints: this.world.teamFacts.ally.objectivePoints,
       ownedItems: [...this.ownedItems],
       endReason: resolution.reason!,
       learningRequirementsCompleted: learningRequirementsCompleted(this.learning),

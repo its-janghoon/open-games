@@ -68,10 +68,16 @@ export function cancelRecall(recalls: RecallTable, id: string): RecallTable {
  * it disagree about whether anyone has won.
  *
  * `gold` is deliberately NOT a field here — see teamGold below.
+ *
+ * `epicMonstersKilled` was added when BattleScene's adoption reached this type and found the scene keeping its OWN
+ * four-field `TeamFacts` interface under the same name. It is not derivable from `objectivePoints`, which weights its
+ * kills (dragon 1, herald 2, baron 3), so two teams with the same points can have killed different numbers of monsters.
+ * It also drives the end-of-match summary, so it is authority rather than presentation.
  */
 export interface TeamFacts {
   championKills: number;
   objectivePoints: number;
+  epicMonstersKilled: number;
 }
 
 export interface TeamFactsTable {
@@ -81,8 +87,8 @@ export interface TeamFactsTable {
 
 export function createTeamFacts(): TeamFactsTable {
   return {
-    ally: { championKills: 0, objectivePoints: 0 },
-    enemy: { championKills: 0, objectivePoints: 0 },
+    ally: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 },
+    enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 },
   };
 }
 
