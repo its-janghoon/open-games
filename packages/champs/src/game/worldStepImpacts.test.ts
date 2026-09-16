@@ -55,7 +55,7 @@ const world = (simTime = 0): WorldState => ({
   nextInsertionOrder: 0,
   passives: { counters: {}, deadlines: {} },
   recalls: {},
-  teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+  teamFacts: { ally: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 }, enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 } },
   outcome: { kind: 'ongoing' },
   resources: {},
   buffs: {},

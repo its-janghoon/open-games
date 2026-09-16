@@ -190,7 +190,7 @@ describe('cloneWorldState', () => {
     structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
     passives: { counters: {}, deadlines: {} },
     recalls: { a: null },
-    teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+    teamFacts: { ally: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 }, enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 } },
     outcome: { kind: 'ongoing' },
     resources: { a: { current: 300, max: 300 } },
     buffs: { a: { buffs: [] } },
@@ -461,6 +461,10 @@ describe('cloneWorldState', () => {
         waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
         outcome: { kind: 'ongoing' },
         recalls: {},
+        teamFacts: {
+          ally: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 },
+          enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 },
+        },
       });
     });
 
@@ -544,6 +548,7 @@ describe('cloneWorldState', () => {
         'recalls',
         'simTime',
         'targets',
+        'teamFacts',
         'tick',
         'wardenCharges',
         'waves',
@@ -562,7 +567,6 @@ describe('cloneWorldState', () => {
         'objectives',
         'resources',
         'structures',
-        'teamFacts',
         'traps',
         'units',
       ]);
@@ -582,7 +586,7 @@ describe('advanceLives', () => {
     nextInsertionOrder: 0,
     passives: { counters: {}, deadlines: {} },
     recalls: {},
-    teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+    teamFacts: { ally: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 }, enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 } },
     outcome: { kind: 'ongoing' },
     resources: {},
     buffs: {},
@@ -679,7 +683,7 @@ describe('advanceEffects', () => {
     nextInsertionOrder: 0,
     passives: { counters: {}, deadlines: {} },
     recalls: {},
-    teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
+    teamFacts: { ally: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 }, enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 } },
     outcome: { kind: 'ongoing' },
     resources: {},
     buffs: {},

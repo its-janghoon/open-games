@@ -101,8 +101,8 @@ describe('team gold', () => {
 describe('team facts', () => {
   it('starts at zero for both teams', () => {
     const facts = createTeamFacts();
-    expect(facts.ally).toEqual({ championKills: 0, objectivePoints: 0 });
-    expect(facts.enemy).toEqual({ championKills: 0, objectivePoints: 0 });
+    expect(facts.ally).toEqual({ championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 });
+    expect(facts.enemy).toEqual({ championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 });
   });
 
   it('clones each side independently', () => {
