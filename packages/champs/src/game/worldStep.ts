@@ -416,9 +416,6 @@ export interface WorldState {
 export function cloneWorldState(state: WorldState): WorldState {
   return {
     units: state.units.map((unit) => ({ ...unit, pos: { x: unit.pos.x, y: unit.pos.y } })),
-    effects: Object.fromEntries(
-      Object.entries(state.effects).map(([id, fx]) => [id, cloneEffectState(fx)]),
-    ),
     structures: Object.fromEntries(
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
@@ -481,6 +478,7 @@ export type AdoptedWorld = Pick<
   | 'lives'
   | 'moveGoals'
   | 'lanePush'
+  | 'effects'
 >;
 
 /** The adopted slice at match start. */
@@ -507,6 +505,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     lives: {},
     moveGoals: {},
     lanePush: {},
+    effects: {},
   };
 }
 
@@ -557,6 +556,9 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
       Object.entries(world.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),
     lanePush: { ...world.lanePush },
+    effects: Object.fromEntries(
+      Object.entries(world.effects).map(([id, fx]) => [id, cloneEffectState(fx)]),
+    ),
   };
 }
 
@@ -621,11 +623,32 @@ export function cloneEffectState(state: EffectState): EffectState {
  * step is gone by the time anything reads it — matching the scene, where the sweep sits
  * at the top of the frame using the already-updated elapsed time.
  */
-export function advanceEffects(state: WorldState, dt: number): void {
+/**
+ * Move the clock by accumulation. The ONE function that advances `simTime` this way.
+ *
+ * There are two legitimate derivations of the clock and a caller must pick exactly one. A headless stepper accumulates
+ * (`simTime += dt`) because dt is all it has. BattleScene DERIVES (`tick * SIMULATION_TICK_SECONDS`, clamped at the match
+ * hard cap) because it owns the tick and a rewind restores an exact tick, where accumulation drifts.
+ *
+ * They agree at a fixed step, which is exactly why mixing them is dangerous: a double advance would not look like a bug,
+ * it would look like a match running slightly fast. Splitting this out of {@link advanceEffects} is what makes the mistake
+ * structurally impossible instead of merely documented — a caller that wants only the sweep can now ask for only the sweep.
+ */
+export function advanceClock(state: WorldState, dt: number): void {
   state.simTime += dt;
+}
+
+/** Expire every participant's effects against the CURRENT clock. Moves no time. */
+export function expireAllEffects(state: WorldState): void {
   for (const fx of Object.values(state.effects)) {
     expireEffects(fx, state.simTime);
   }
+}
+
+/** Clock then sweep, for a caller that owns the clock by accumulation. */
+export function advanceEffects(state: WorldState, dt: number): void {
+  advanceClock(state, dt);
+  expireAllEffects(state);
 }
 
 /**
