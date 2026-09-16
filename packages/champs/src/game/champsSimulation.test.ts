@@ -296,6 +296,7 @@ describe('champs world under rollback', () => {
         structures: {},
         economy: {},
         progression: {},
+        lanePush: {},
         moveGoals: { p1: null },
       };
       queueImpact(state, {

@@ -188,6 +188,7 @@ describe('cloneWorldState', () => {
     nextInsertionOrder: 4,
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
     progression: {},
+    lanePush: {},
     structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
     passives: { counters: {}, deadlines: {} },
     recalls: { a: null },
@@ -472,6 +473,8 @@ describe('cloneWorldState', () => {
         progression: {},
         buffs: {},
         lives: {},
+        moveGoals: {},
+        lanePush: {},
       });
     });
 
@@ -551,7 +554,9 @@ describe('cloneWorldState', () => {
         'cooldowns',
         'dragonStacks',
         'economy',
+        'lanePush',
         'lives',
+        'moveGoals',
         'nextInsertionOrder',
         'outcome',
         'passives',
@@ -572,7 +577,6 @@ describe('cloneWorldState', () => {
         'camps',
         'effects',
         'minions',
-        'moveGoals',
         'objectives',
         'structures',
         'traps',
@@ -612,6 +616,7 @@ describe('advanceLives', () => {
     structures: {},
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 } },
     progression: {},
+    lanePush: {},
     moveGoals: {},
   });
 
@@ -710,6 +715,7 @@ describe('advanceEffects', () => {
     structures: {},
     economy: {},
     progression: {},
+    lanePush: {},
     moveGoals: {},
   });
 

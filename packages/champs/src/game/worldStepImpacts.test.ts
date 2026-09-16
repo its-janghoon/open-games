@@ -73,6 +73,7 @@ const world = (simTime = 0): WorldState => ({
   structures: {},
   economy: {},
   progression: {},
+  lanePush: {},
   moveGoals: { caster: null, victim: null },
 });
 
