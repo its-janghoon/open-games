@@ -13,8 +13,19 @@
  * the state it READS was.
  */
 
-/** Baseline regeneration in resource per second, before any buff. */
-export const RESOURCE_REGEN_PER_SECOND = 6;
+/**
+ * Baseline regeneration in resource per second, before any buff.
+ *
+ * 8, taken from BattleScene's own `RESOURCE_REGEN`, which is the rate every shipped match has actually run at. This
+ * module declared 6 — a value nothing in the game used — so adopting `advanceResources` in the scene would have cut
+ * regeneration by a quarter under cover of a refactor, and called it a rollback fix.
+ *
+ * The same mistake is recorded in autoAttack.ts, which invented a range-based fire interval instead of taking the
+ * scene's `1 / attackSpeed`. Both times a test passed: this module's test asserts `regenerateResource` against THIS
+ * CONSTANT, so it agreed with 6 and would agree with any number. A test written from the new code cannot tell you the
+ * extraction took the wrong rule — only the call site it was extracted from can.
+ */
+export const RESOURCE_REGEN_PER_SECOND = 8;
 
 export interface ResourceState {
   current: number;

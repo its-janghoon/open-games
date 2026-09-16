@@ -466,6 +466,7 @@ describe('cloneWorldState', () => {
           enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 },
         },
         cooldowns: {},
+        resources: {},
       });
     });
 
@@ -548,6 +549,7 @@ describe('cloneWorldState', () => {
         'passives',
         'pendingImpacts',
         'recalls',
+        'resources',
         'simTime',
         'targets',
         'teamFacts',
@@ -566,7 +568,6 @@ describe('cloneWorldState', () => {
         'minions',
         'moveGoals',
         'objectives',
-        'resources',
         'structures',
         'traps',
         'units',
