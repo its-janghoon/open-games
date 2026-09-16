@@ -295,6 +295,7 @@ describe('champs world under rollback', () => {
         waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
         structures: {},
         economy: {},
+        progression: {},
         moveGoals: { p1: null },
       };
       queueImpact(state, {

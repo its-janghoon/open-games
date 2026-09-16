@@ -76,6 +76,7 @@ describe('advanceLives against a real match', () => {
       waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
       structures: {},
       economy: {},
+      progression: {},
       moveGoals: {},
     };
 
@@ -127,6 +128,7 @@ describe('advanceLives against a real match', () => {
       waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
       structures: {},
       economy: {},
+      progression: {},
       moveGoals: {},
     });
 
