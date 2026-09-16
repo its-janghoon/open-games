@@ -391,9 +391,6 @@ export interface WorldState {
 export function cloneWorldState(state: WorldState): WorldState {
   return {
     units: state.units.map((unit) => ({ ...unit, pos: { x: unit.pos.x, y: unit.pos.y } })),
-    cooldowns: Object.fromEntries(
-      Object.entries(state.cooldowns).map(([id, cds]) => [id, { ...cds }]),
-    ),
     effects: Object.fromEntries(
       Object.entries(state.effects).map(([id, fx]) => [id, cloneEffectState(fx)]),
     ),
@@ -469,6 +466,7 @@ export type AdoptedWorld = Pick<
   | 'outcome'
   | 'recalls'
   | 'teamFacts'
+  | 'cooldowns'
 >;
 
 /** The adopted slice at match start. */
@@ -487,6 +485,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     outcome: ongoing(),
     recalls: {},
     teamFacts: createTeamFacts(),
+    cooldowns: {},
   };
 }
 
@@ -514,6 +513,9 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     outcome: { ...world.outcome },
     recalls: { ...world.recalls },
     teamFacts: cloneTeamFacts(world.teamFacts),
+    cooldowns: Object.fromEntries(
+      Object.entries(world.cooldowns).map(([id, cds]) => [id, { ...cds }]),
+    ),
   };
 }
 

@@ -465,6 +465,7 @@ describe('cloneWorldState', () => {
           ally: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 },
           enemy: { championKills: 0, objectivePoints: 0, epicMonstersKilled: 0 },
         },
+        cooldowns: {},
       });
     });
 
@@ -540,6 +541,7 @@ describe('cloneWorldState', () => {
 
       expect([...adopted].sort()).toEqual([
         'baron',
+        'cooldowns',
         'dragonStacks',
         'nextInsertionOrder',
         'outcome',
@@ -558,7 +560,6 @@ describe('cloneWorldState', () => {
         'buffs',
         'campMembers',
         'camps',
-        'cooldowns',
         'economy',
         'effects',
         'lives',

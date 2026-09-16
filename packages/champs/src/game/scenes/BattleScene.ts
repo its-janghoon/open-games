@@ -477,7 +477,6 @@ const VISION_RADIUS_STRUCTURE = 230;
 interface BotState {
   champion: Champion;
   side: MapSide;
-  cds: CooldownState;
   resource: number;
   maxResource: number;
   progress: ProgressState;
@@ -662,7 +661,6 @@ export default class BattleScene extends Phaser.Scene {
 
   private structureLines: StructureLine[] = [];
 
-  private playerCds: CooldownState = createCooldownState();
   private playerResource = 0;
   private playerMaxResource = 300;
 
@@ -882,7 +880,6 @@ export default class BattleScene extends Phaser.Scene {
     this.world = createAdoptedWorld();
     this.structureById.clear();
     this.structureLines = [];
-    this.playerCds = createCooldownState();
     this.playerResource = this.playerMaxResource;
     this.playerProgress = createProgress(STARTING_GOLD);
     this.ownedItems = [];
@@ -1294,7 +1291,6 @@ export default class BattleScene extends Phaser.Scene {
           entity.bot = {
             champion: slot.champion,
             side,
-            cds: createCooldownState(),
             resource: 300,
             maxResource: 300,
             progress: createProgress(STARTING_GOLD),
@@ -2022,12 +2018,12 @@ export default class BattleScene extends Phaser.Scene {
 
     this.advanceChampionLives();
     this.reviveInhibitors();
-    tickCooldowns(this.playerCds, dt);
+    tickCooldowns(this.cooldownsFor(this.player), dt);
     const blueRegen = this.blueBuffRegen();
     this.playerResource = Math.min(this.playerMaxResource, this.playerResource + (RESOURCE_REGEN + blueRegen) * dt);
     for (const c of this.champions) {
       if (!c.bot) continue;
-      tickCooldowns(c.bot.cds, dt);
+      tickCooldowns(this.cooldownsFor(c), dt);
       const botBlueRegen = c.bot.buffs.buffs.some((buff) => buff.kind === 'blue')
         ? BUFF_EFFECTS.blue.resourceRegenPerSecond : 0;
       c.bot.resource = Math.min(c.bot.maxResource, c.bot.resource + (RESOURCE_REGEN + botBlueRegen) * dt);
@@ -2207,6 +2203,22 @@ export default class BattleScene extends Phaser.Scene {
    */
   private get playerRecallStartedAt(): number | null {
     return this.world.recalls[this.player.unit.id] ?? null;
+  }
+
+  /**
+   * This entity's ability cooldowns, from the one Record the snapshot carries.
+   *
+   * Created on demand rather than at spawn: `world.cooldowns` is keyed by unit id, and a champion that has never cast has
+   * no entry to restore. Lazy creation keeps the two paths (player, bot) identical, which is the point of the gather --
+   * the scene used to keep the player's set in a field and every bot's in its own `BotState`, so a rollback would have had
+   * to know about both.
+   */
+  private cooldownsFor(entity: Entity): CooldownState {
+    const existing = this.world.cooldowns[entity.unit.id];
+    if (existing) return existing;
+    const fresh = createCooldownState();
+    this.world.cooldowns[entity.unit.id] = fresh;
+    return fresh;
   }
 
   private startRecall() {
@@ -2690,7 +2702,7 @@ export default class BattleScene extends Phaser.Scene {
         champion: this.playerChampion,
         resource: this.playerResource,
         maxResource: this.playerMaxResource,
-        cds: this.playerCds,
+        cds: this.cooldownsFor(entity),
         progress: this.playerProgress,
         ownedItems: this.ownedItems,
         // The human is always the ally side in a local match.
@@ -2702,7 +2714,7 @@ export default class BattleScene extends Phaser.Scene {
       champion: bot.champion,
       resource: bot.resource,
       maxResource: bot.maxResource,
-      cds: bot.cds,
+      cds: this.cooldownsFor(entity),
       progress: bot.progress,
       ownedItems: bot.ownedItems,
       side: bot.side,
@@ -2934,9 +2946,10 @@ export default class BattleScene extends Phaser.Scene {
     ) return;
     this.cancelRecall('ability');
     // Aim has already been converted to the flat authoritative plane.
-    this.castAbility(this.player, slot, aim, this.playerChampion, this.playerCds, () => {
+    const playerCds = this.cooldownsFor(this.player);
+    this.castAbility(this.player, slot, aim, this.playerChampion, playerCds, () => {
       const cost = this.abilityBySlot(this.playerChampion, slot).cost;
-      if (this.playerResource < cost || this.playerCds[slot] > 0) return false;
+      if (this.playerResource < cost || playerCds[slot] > 0) return false;
       this.playerResource -= cost;
       return true;
     });
@@ -3003,9 +3016,10 @@ export default class BattleScene extends Phaser.Scene {
 
   private botCast(bot: Entity, slot: CooldownKey, aim: Vec2) {
     const state = bot.bot!;
-    this.castAbility(bot, slot, aim, state.champion, state.cds, () => {
+    const cds = this.cooldownsFor(bot);
+    this.castAbility(bot, slot, aim, state.champion, cds, () => {
       const cost = this.abilityBySlot(state.champion, slot).cost;
-      if (state.resource < cost || state.cds[slot] > 0) return false;
+      if (state.resource < cost || cds[slot] > 0) return false;
       state.resource -= cost;
       return true;
     });
@@ -3628,7 +3642,7 @@ export default class BattleScene extends Phaser.Scene {
 
       if (shouldProcChrono(impact.chronoProc, hits)) {
         const caster = this.entityById.get(source.id);
-        const cds = caster === this.player ? this.playerCds : caster?.bot?.cds;
+        const cds = caster ? this.cooldownsFor(caster) : undefined;
         if (cds) tickCooldowns(cds, CHRONO_PROC_SECONDS);
       }
     }
@@ -4718,7 +4732,7 @@ export default class BattleScene extends Phaser.Scene {
       minimap: this.buildMinimap(),
       abilities: slots.map((slot) => {
         const total = this.cooldownFor(this.player, this.playerChampion, slot);
-        const remaining = this.playerCds[slot];
+        const remaining = this.cooldownsFor(this.player)[slot];
         return {
           slot,
           progress: total <= 0 ? 1 : Math.min(1, Math.max(0, 1 - remaining / total)),
