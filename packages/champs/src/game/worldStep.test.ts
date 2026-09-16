@@ -457,6 +457,8 @@ describe('cloneWorldState', () => {
         wardenCharges: { ally: null, enemy: null },
         baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
         dragonStacks: { ally: 0, enemy: 0 },
+        pendingImpacts: [],
+        waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
       });
     });
 
@@ -535,10 +537,12 @@ describe('cloneWorldState', () => {
         'dragonStacks',
         'nextInsertionOrder',
         'passives',
+        'pendingImpacts',
         'simTime',
         'targets',
         'tick',
         'wardenCharges',
+        'waves',
       ]);
       expect(remaining).toEqual([
         'autoAttackers',
@@ -553,14 +557,12 @@ describe('cloneWorldState', () => {
         'moveGoals',
         'objectives',
         'outcome',
-        'pendingImpacts',
         'recalls',
         'resources',
         'structures',
         'teamFacts',
         'traps',
         'units',
-        'waves',
       ]);
     });
   });

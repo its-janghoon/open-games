@@ -7,7 +7,7 @@ import {
 import { expireEffects, type EffectState } from './effects';
 import { advanceGold, type GoldState } from './rift/economy';
 import type { StructureState } from './rift/structures';
-import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
+import { cloneWaveSchedule, initialWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import { cloneMinions, type MinionState } from './rift/minionBodies';
 import type { TargetTable } from './rift/minionCombat';
 import { clonePassiveState, createPassiveState, type PassiveState } from './rift/passives';
@@ -405,14 +405,12 @@ export function cloneWorldState(state: WorldState): WorldState {
     lives: Object.fromEntries(
       Object.entries(state.lives).map(([id, life]) => [id, { ...life }]),
     ),
-    pendingImpacts: state.pendingImpacts.map(cloneImpact),
     economy: Object.fromEntries(
       Object.entries(state.economy).map(([id, gold]) => [id, { ...gold }]),
     ),
     structures: Object.fromEntries(
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
-    waves: cloneWaveSchedule(state.waves),
     minions: cloneMinions(state.minions),
     recalls: { ...state.recalls },
     teamFacts: cloneTeamFacts(state.teamFacts),
@@ -470,6 +468,8 @@ export type AdoptedWorld = Pick<
   | 'wardenCharges'
   | 'baron'
   | 'dragonStacks'
+  | 'pendingImpacts'
+  | 'waves'
 >;
 
 /** The adopted slice at match start. */
@@ -483,6 +483,8 @@ export function createAdoptedWorld(): AdoptedWorld {
     wardenCharges: { ally: null, enemy: null },
     baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
     dragonStacks: { ally: 0, enemy: 0 },
+    pendingImpacts: [],
+    waves: initialWaveSchedule(),
   };
 }
 
@@ -503,6 +505,8 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     wardenCharges: cloneWardenCharges(world.wardenCharges),
     baron: cloneBaron(world.baron),
     dragonStacks: { ...world.dragonStacks },
+    pendingImpacts: world.pendingImpacts.map(cloneImpact),
+    waves: cloneWaveSchedule(world.waves),
   };
 }
 
