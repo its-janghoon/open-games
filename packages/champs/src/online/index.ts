@@ -3,6 +3,7 @@ export * from './eventLog';
 export * from './json';
 export * from './matchmaking';
 export * from './protocol';
+export * from './roster';
 export * from './session';
 export * from './snapshot';
 export * from './transport';
