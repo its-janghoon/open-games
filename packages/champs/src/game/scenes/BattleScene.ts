@@ -487,7 +487,6 @@ const VISION_RADIUS_STRUCTURE = 230;
 interface BotState {
   champion: Champion;
   side: MapSide;
-  progress: ChampionLevel;
   ownedItems: string[];
   buffs: BuffState;
   currentIntent: AiIntent;
@@ -668,9 +667,8 @@ export default class BattleScene extends Phaser.Scene {
   private structureLines: StructureLine[] = [];
 
 
-  // Economy / progression. Each AI bot carries its own ProgressState; this is
-  // the human player's.
-  private playerProgress: ChampionLevel = { level: 1, xp: 0 };
+  // Items. Gold and progression are no longer per-bot fields: they live in `world.economy` and `world.progression`,
+  // keyed by unit id, so the player and every bot are read the same way.
   private ownedItems: string[] = [];
   /**
    * Observations of the human's own decisions, for learning their ghost. Bounded by
@@ -878,7 +876,6 @@ export default class BattleScene extends Phaser.Scene {
     this.world = createAdoptedWorld();
     this.structureById.clear();
     this.structureLines = [];
-    this.playerProgress = { level: 1, xp: 0 };
     this.ownedItems = [];
     this.playerDeaths = 0;
     this.playerBuffs = createBuffState();
@@ -1285,7 +1282,6 @@ export default class BattleScene extends Phaser.Scene {
           entity.bot = {
             champion: slot.champion,
             side,
-            progress: { level: 1, xp: 0 },
             ownedItems: [],
             buffs: createBuffState(),
             currentIntent: 'approach',
@@ -1753,7 +1749,7 @@ export default class BattleScene extends Phaser.Scene {
   private applyChampionStats(entity: Entity, side: MapSide) {
     const isHuman = entity === this.player;
     const champion = isHuman ? this.playerChampion : entity.bot!.champion;
-    const level = isHuman ? this.playerProgress.level : entity.bot!.progress.level;
+    const level = this.progressionFor(entity).level;
     const items = isHuman ? this.ownedItems : entity.bot!.ownedItems;
     const team = this.teamModifiers(side);
     const eff = computeEffectiveStats(champion, level, items, team);
@@ -2238,6 +2234,20 @@ export default class BattleScene extends Phaser.Scene {
     if (existing) return existing;
     const fresh: GoldState = { gold: STARTING_GOLD, accrual: 0, totalEarned: STARTING_GOLD };
     this.world.economy[entity.unit.id] = fresh;
+    return fresh;
+  }
+
+  /**
+   * This entity's level and banked XP, from the one Record the snapshot carries.
+   *
+   * Level is not a scoreboard number: `statsForLevel` scales health, attack damage, armour and ability power off it, so it
+   * has to be restorable with everything else it feeds.
+   */
+  private progressionFor(entity: Entity): ChampionLevel {
+    const existing = this.world.progression[entity.unit.id];
+    if (existing) return existing;
+    const fresh: ChampionLevel = { level: 1, xp: 0 };
+    this.world.progression[entity.unit.id] = fresh;
     return fresh;
   }
 
@@ -2748,7 +2758,7 @@ export default class BattleScene extends Phaser.Scene {
         resource: this.resourceFor(entity).current,
         maxResource: this.resourceFor(entity).max,
         cds: this.cooldownsFor(entity),
-        progress: this.playerProgress,
+        progress: this.progressionFor(entity),
         gold: this.economyFor(entity).gold,
         ownedItems: this.ownedItems,
         // The human is always the ally side in a local match.
@@ -2761,7 +2771,7 @@ export default class BattleScene extends Phaser.Scene {
       resource: this.resourceFor(entity).current,
       maxResource: this.resourceFor(entity).max,
       cds: this.cooldownsFor(entity),
-      progress: bot.progress,
+      progress: this.progressionFor(entity),
       gold: this.economyFor(entity).gold,
       ownedItems: bot.ownedItems,
       side: bot.side,
@@ -3821,8 +3831,8 @@ export default class BattleScene extends Phaser.Scene {
 
     if (targetEntity?.life) {
       const level = targetEntity === this.player
-        ? this.playerProgress.level
-        : targetEntity.bot?.progress.level ?? 1;
+        ? this.progressionFor(targetEntity).level
+        : this.progressionFor(targetEntity).level;
       targetEntity.life = killChampion(targetEntity.life, this.world.simTime, level, this.mode);
       if (targetEntity.champion?.id === 'duskarrow') {
         this.world.passives = {
@@ -3907,8 +3917,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private awardBounty(entity: Entity | undefined, bounty: { gold: number; xp: number }) {
     if (!entity || entity.unit.kind !== 'champion') return;
-    const progress = entity === this.player ? this.playerProgress : entity.bot?.progress;
-    if (!progress) return;
+    const progress = this.progressionFor(entity);
     // Bounty gold counts as EARNED as well as held, which is why the derived team total agrees with the per-champion one.
     const purse = this.economyFor(entity);
     if (bounty.gold > 0) {
@@ -4707,9 +4716,9 @@ export default class BattleScene extends Phaser.Scene {
       enemyNexusPct: this.enemyNexus ? this.enemyNexus.unit.hp / this.enemyNexus.unit.maxHp : 1,
       elapsed: this.world.simTime,
       gold: Math.floor(this.economyFor(this.player).gold),
-      level: this.playerProgress.level,
+      level: this.progressionFor(this.player).level,
       xpPct,
-      xpCapped: this.playerProgress.level >= 18,
+      xpCapped: this.progressionFor(this.player).level >= 18,
       shopAvailable: this.inBase(this.player.unit, 'ally') && this.pauseReasons.size === 0,
       ownedItems: [...this.ownedItems],
       buffs: [
@@ -4807,7 +4816,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private xpProgressPct(): number {
     // Approximate progress toward the next level from banked xp.
-    const p = this.playerProgress;
+    const p = this.progressionFor(this.player);
     if (p.level >= 18) return 1;
     // economy.addXp already consumed thresholds; xp holds remainder toward next.
     const need = 280 + (p.level - 1) * 100;
@@ -4955,7 +4964,7 @@ export default class BattleScene extends Phaser.Scene {
         championKills: this.stats.championKills,
         minionKills: this.stats.minionKills,
         damageDealt: Math.round(this.stats.damageDealt),
-        level: this.playerProgress.level,
+        level: this.progressionFor(this.player).level,
         gold: Math.floor(this.economyFor(this.player).gold),
       },
     };

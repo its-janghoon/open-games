@@ -187,6 +187,7 @@ describe('cloneWorldState', () => {
     pendingImpacts: [impact({ insertionOrder: 3, dueAt: 14 })],
     nextInsertionOrder: 4,
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 }, b: { gold: 500, accrual: 0.25, totalEarned: 3 } },
+    progression: {},
     structures: { t1: { hp: 1200, maxHp: 1200, dead: false, killedAt: null } },
     passives: { counters: {}, deadlines: {} },
     recalls: { a: null },
@@ -468,6 +469,7 @@ describe('cloneWorldState', () => {
         cooldowns: {},
         resources: {},
         economy: {},
+        progression: {},
       });
     });
 
@@ -550,6 +552,7 @@ describe('cloneWorldState', () => {
         'outcome',
         'passives',
         'pendingImpacts',
+        'progression',
         'recalls',
         'resources',
         'simTime',
@@ -606,6 +609,7 @@ describe('advanceLives', () => {
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},
     economy: { a: { gold: 500, accrual: 0, totalEarned: 0 } },
+    progression: {},
     moveGoals: {},
   });
 
@@ -703,6 +707,7 @@ describe('advanceEffects', () => {
     waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
     structures: {},
     economy: {},
+    progression: {},
     moveGoals: {},
   });
 

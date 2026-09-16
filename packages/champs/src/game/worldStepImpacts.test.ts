@@ -72,6 +72,7 @@ const world = (simTime = 0): WorldState => ({
   waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
   structures: {},
   economy: {},
+  progression: {},
   moveGoals: { caster: null, victim: null },
 });
 

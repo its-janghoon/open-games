@@ -5,7 +5,7 @@ import {
   type ChampionLifeState,
 } from './championLifeState';
 import { expireEffects, type EffectState } from './effects';
-import { advanceGold, type GoldState } from './rift/economy';
+import { advanceGold, type ChampionLevel, type GoldState } from './rift/economy';
 import type { StructureState } from './rift/structures';
 import { cloneWaveSchedule, initialWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import { cloneMinions, type MinionState } from './rift/minionBodies';
@@ -360,6 +360,19 @@ export interface WorldState {
   /** Per-side tyrant buff. */
   baron: SideState<BaronBuffState>;
   /**
+   * Champion level and banked XP, per participant.
+   *
+   * The THIRD field found missing from this state rather than merely unadopted, after `dragonStacks` and the epic-monster
+   * count. It is not a summary: `statsForLevel` scales health, attack damage, armour and ability power off the level, so
+   * two peers holding different levels field differently-statted champions from identical inputs. A rollback over a state
+   * without it restores gold and cooldowns perfectly and drifts on every stat.
+   *
+   * Separate from `economy` because gold and progression are separate rules with separate storage in the pure layer --
+   * `GoldState` carries accrual and lifetime earnings, `ChampionLevel` carries the level ladder -- and folding them would
+   * put a fractional gold accumulator next to an XP threshold for no reason beyond both being "progress".
+   */
+  progression: Record<string, ChampionLevel>;
+  /**
    * Dragon stacks per side.
    *
    * Added when the scene's adoption reached the objectives and found this had no home here at all — which is worth
@@ -465,6 +478,7 @@ export type AdoptedWorld = Pick<
   | 'cooldowns'
   | 'resources'
   | 'economy'
+  | 'progression'
 >;
 
 /** The adopted slice at match start. */
@@ -486,6 +500,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     cooldowns: {},
     resources: {},
     economy: {},
+    progression: {},
   };
 }
 
@@ -519,6 +534,9 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     resources: cloneResources(world.resources),
     economy: Object.fromEntries(
       Object.entries(world.economy).map(([id, gold]) => [id, { ...gold }]),
+    ),
+    progression: Object.fromEntries(
+      Object.entries(world.progression).map(([id, level]) => [id, { ...level }]),
     ),
   };
 }

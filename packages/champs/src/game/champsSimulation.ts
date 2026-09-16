@@ -219,6 +219,7 @@ export function createChampsSimulation(
         enemyInhibitor: initialStructure(2000),
       },
         economy: Object.fromEntries(participants.map((id) => [id, initialGold(500)])),
+        progression: {},
         moveGoals: Object.fromEntries(participants.map((id) => [id, null])),
       };
     },
