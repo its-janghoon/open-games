@@ -499,7 +499,6 @@ interface BotState {
   /** Cached lane push waypoints (flat gameplay pixels), enemy-nexus-ward. */
   pushPath: Vec2[];
   /** Current index into {@link pushPath} while marching. */
-  pushIndex: number;
 }
 
 /** A rendered combat entity: pairs pure combat state with its Phaser visuals. */
@@ -749,7 +748,6 @@ export default class BattleScene extends Phaser.Scene {
    */
   private inhibitorKillTimes: Record<string, number> = {};
 
-  private moveTarget: Vec2 | null = null;
   private playerOrder: 'move' | 'attack-move' | 'target' | 'stop' = 'stop';
   private attackMoveArmed = false;
   private armedAbility: CooldownKey | null = null;
@@ -897,7 +895,6 @@ export default class BattleScene extends Phaser.Scene {
     this.world.waves.nextOrder = 0;
     this.world.waves.spawnedWaves = 0;
     this.inhibitorKillTimes = {};
-    this.moveTarget = null;
     this.playerOrder = 'stop';
     this.attackMoveArmed = false;
     this.armedAbility = null;
@@ -1287,7 +1284,6 @@ export default class BattleScene extends Phaser.Scene {
             nextDecisionAt: 0,
             lane: slot.lane,
             pushPath: laneWaypoints(slot.lane, side),
-            pushIndex: 0,
           };
         }
         this.champions.push(entity);
@@ -2139,7 +2135,7 @@ export default class BattleScene extends Phaser.Scene {
       this.cancelRecall('movement');
       this.attackMoveArmed = false;
       this.playerOrder = 'move';
-      this.moveTarget = { ...command.point };
+      this.setPlayerMoveGoal(command.point);
       delete this.world.targets[this.player.unit.id];
     } else if (command.type === 'target-at') {
       this.cancelRecall('movement');
@@ -2147,23 +2143,23 @@ export default class BattleScene extends Phaser.Scene {
       const target = this.entityAtPoint(command.point, this.player.unit);
       if (target) {
         this.playerOrder = 'target';
-        this.moveTarget = null;
+        this.setPlayerMoveGoal(null);
         this.world.targets[this.player.unit.id] = target.unit.id;
       } else {
         this.playerOrder = 'move';
-        this.moveTarget = { ...command.point };
+        this.setPlayerMoveGoal(command.point);
         delete this.world.targets[this.player.unit.id];
       }
     } else if (command.type === 'attack-move-to') {
       this.cancelRecall('movement');
       this.attackMoveArmed = false;
       this.playerOrder = 'attack-move';
-      this.moveTarget = { ...command.point };
+      this.setPlayerMoveGoal(command.point);
       delete this.world.targets[this.player.unit.id];
     } else if (command.type === 'stop') {
       this.cancelRecall('movement');
       this.attackMoveArmed = false;
-      this.moveTarget = null;
+      this.setPlayerMoveGoal(null);
       this.playerOrder = 'stop';
       delete this.world.targets[this.player.unit.id];
     } else if (command.type === 'recall') {
@@ -2234,6 +2230,27 @@ export default class BattleScene extends Phaser.Scene {
     const fresh: GoldState = { gold: STARTING_GOLD, accrual: 0, totalEarned: STARTING_GOLD };
     this.world.economy[entity.unit.id] = fresh;
     return fresh;
+  }
+
+  /**
+   * The player's ORDERED move destination, or null when they have none.
+   *
+   * `world.moveGoals` is keyed by participant because a networked match gives every peer orders; today only the human
+   * issues them, so today it holds one entry. Bot destinations are NOT here on purpose -- a bot recomputes
+   * `laneAdvanceGoal` from its waypoint path every tick, so it has no ordered goal to store, and inventing one would put
+   * a derived value in the snapshot.
+   */
+  private get playerMoveGoal(): Vec2 | null {
+    return this.world.moveGoals[this.player.unit.id] ?? null;
+  }
+
+  private setPlayerMoveGoal(goal: Vec2 | null): void {
+    this.world.moveGoals[this.player.unit.id] = goal ? { ...goal } : null;
+  }
+
+  /** How far along its lane path a bot has marched. Real state: see `WorldState.lanePush`. */
+  private lanePushFor(entity: Entity): number {
+    return this.world.lanePush[entity.unit.id] ?? 0;
   }
 
   /**
@@ -2326,7 +2343,7 @@ export default class BattleScene extends Phaser.Scene {
     this.world.recalls[this.player.unit.id] = this.world.simTime;
     this.recallCancellation = '';
     this.playerOrder = 'stop';
-    this.moveTarget = null;
+    this.setPlayerMoveGoal(null);
   }
 
   private cancelRecall(reason: string) {
@@ -2623,13 +2640,14 @@ export default class BattleScene extends Phaser.Scene {
       }
     }
 
-    if (this.moveTarget) {
-      const d = distance(u.pos, this.moveTarget);
+    const moveGoal = this.playerMoveGoal;
+    if (moveGoal) {
+      const d = distance(u.pos, moveGoal);
       if (d < 4) {
-        this.moveTarget = null;
+        this.setPlayerMoveGoal(null);
         this.playerOrder = 'stop';
       } else {
-        this.moveUnitToward(u, this.moveTarget, dt);
+        this.moveUnitToward(u, moveGoal, dt);
       }
     }
   }
@@ -2675,15 +2693,15 @@ export default class BattleScene extends Phaser.Scene {
         if (target) {
           this.moveUnitToward(u, target.pos, dt);
         } else {
-          const goal = this.laneAdvanceGoal(state);
+          const goal = this.laneAdvanceGoal(bot, state);
           this.moveUnitToward(u, goal, dt);
           // Advance to the next lane waypoint once this one is reached so the
           // bot keeps marching toward the enemy nexus.
           if (
-            state.pushIndex < state.pushPath.length - 1 &&
+            this.lanePushFor(bot) < state.pushPath.length - 1 &&
             distance(u.pos, goal) <= 30
           ) {
-            state.pushIndex += 1;
+            this.world.lanePush[bot.unit.id] = this.lanePushFor(bot) + 1;
           }
         }
         break;
@@ -2731,16 +2749,17 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   /**
-   * The next lane waypoint a bot should walk toward while pushing. Advances the
-   * bot's cached push index as it reaches each waypoint so it marches down its
-   * lane toward the enemy nexus. Returns the final waypoint once the lane is
-   * fully walked. No per-frame allocation beyond reading the cached path.
+   * The next lane waypoint a bot should walk toward while pushing. Returns the final waypoint once the lane is fully
+   * walked. No per-frame allocation beyond reading the cached path.
+   *
+   * Takes the ENTITY rather than just its bot state, because how far along the lane it has marched now lives in
+   * `world.lanePush` keyed by unit id, not on the bot.
    */
-  private laneAdvanceGoal(state: BotState): Vec2 {
+  private laneAdvanceGoal(entity: Entity, state: BotState): Vec2 {
     const path = state.pushPath;
     if (path.length === 0) return BASE_POSITIONS[state.side];
     // (path is authored ally->enemy; laneWaypoints already reversed for enemy).
-    return path[Math.min(state.pushIndex, path.length - 1)];
+    return path[Math.min(this.lanePushFor(entity), path.length - 1)];
   }
 
   /**
@@ -3398,7 +3417,7 @@ export default class BattleScene extends Phaser.Scene {
         if (entity === this.player) this.fillResource(entity);
         if (entity.bot) {
           this.fillResource(entity);
-          entity.bot.pushIndex = 0;
+          this.world.lanePush[entity.unit.id] = 0;
           entity.bot.currentIntent = 'approach';
           entity.bot.pendingIntent = null;
           entity.bot.intentReadyAt = this.world.simTime;

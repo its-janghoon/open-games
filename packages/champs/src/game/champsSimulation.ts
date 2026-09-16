@@ -220,6 +220,7 @@ export function createChampsSimulation(
       },
         economy: Object.fromEntries(participants.map((id) => [id, initialGold(500)])),
         progression: {},
+        lanePush: {},
         moveGoals: Object.fromEntries(participants.map((id) => [id, null])),
       };
     },

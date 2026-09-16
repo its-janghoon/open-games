@@ -360,6 +360,18 @@ export interface WorldState {
   /** Per-side tyrant buff. */
   baron: SideState<BaronBuffState>;
   /**
+   * How far along its lane waypoint path each bot has marched.
+   *
+   * The FOURTH field found missing from this state rather than merely unadopted. It looks like scratch and is not: the
+   * index advances when a bot gets within 30 units of its current waypoint, so it depends on the whole history of where
+   * that bot has been. Recomputing it from a position is not the same function — a bot knocked backwards would recompute
+   * a lower index and walk the lane twice.
+   *
+   * The PATH itself is not here, and deliberately: `laneWaypoints(lane, side)` derives it from the composition, so it is
+   * setup rather than state. Only the position along it can change.
+   */
+  lanePush: Record<string, number>;
+  /**
    * Champion level and banked XP, per participant.
    *
    * The THIRD field found missing from this state rather than merely unadopted, after `dragonStacks` and the epic-monster
@@ -416,9 +428,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     camps: cloneCampSpawns(state.camps),
     campMembers: cloneCampMembers(state.campMembers),
     objectives: cloneObjectives(state.objectives),
-    moveGoals: Object.fromEntries(
-      Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
-    ),
     // Last, so the adopted fields come from the one helper the scene also uses. See {@link AdoptedWorld}.
     ...cloneAdoptedWorld(state),
   };
@@ -470,6 +479,8 @@ export type AdoptedWorld = Pick<
   | 'progression'
   | 'buffs'
   | 'lives'
+  | 'moveGoals'
+  | 'lanePush'
 >;
 
 /** The adopted slice at match start. */
@@ -494,6 +505,8 @@ export function createAdoptedWorld(): AdoptedWorld {
     progression: {},
     buffs: {},
     lives: {},
+    moveGoals: {},
+    lanePush: {},
   };
 }
 
@@ -540,6 +553,10 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     lives: Object.fromEntries(
       Object.entries(world.lives).map(([id, life]) => [id, { ...life }]),
     ),
+    moveGoals: Object.fromEntries(
+      Object.entries(world.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
+    ),
+    lanePush: { ...world.lanePush },
   };
 }
 

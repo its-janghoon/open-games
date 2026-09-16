@@ -77,6 +77,7 @@ describe('advanceLives against a real match', () => {
       structures: {},
       economy: {},
       progression: {},
+      lanePush: {},
       moveGoals: {},
     };
 
@@ -129,6 +130,7 @@ describe('advanceLives against a real match', () => {
       structures: {},
       economy: {},
       progression: {},
+      lanePush: {},
       moveGoals: {},
     });
 
