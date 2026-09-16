@@ -10,7 +10,7 @@ import type { StructureState } from './rift/structures';
 import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import { cloneMinions, type MinionState } from './rift/minionBodies';
 import type { TargetTable } from './rift/minionCombat';
-import { clonePassiveState, type PassiveState } from './rift/passives';
+import { clonePassiveState, createPassiveState, type PassiveState } from './rift/passives';
 import { cloneAutoAttackers, type AutoAttacker } from './rift/autoAttack';
 import { cloneResources, type ResourceState } from './rift/resources';
 import { cloneTraps, type TrapState } from './rift/traps';
@@ -404,7 +404,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     waves: cloneWaveSchedule(state.waves),
     minions: cloneMinions(state.minions),
     targets: { ...state.targets },
-    passives: clonePassiveState(state.passives),
     recalls: { ...state.recalls },
     teamFacts: cloneTeamFacts(state.teamFacts),
     // Spread rather than shared: the union's payload is strings today, and sharing would leak a rewritten winner back
@@ -419,10 +418,50 @@ export function cloneWorldState(state: WorldState): WorldState {
     buffs: cloneBuffs(state.buffs),
     baron: cloneBaron(state.baron),
     objectives: cloneObjectives(state.objectives),
-    wardenCharges: cloneWardenCharges(state.wardenCharges),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),
+    // Last, so the adopted fields come from the one helper the scene also uses. See {@link AdoptedWorld}.
+    ...cloneAdoptedWorld(state),
+  };
+}
+
+/**
+ * The fields of {@link WorldState} that BattleScene has adopted as its OWN storage.
+ *
+ * This type is a progress ledger the compiler enforces, and it exists because of a hazard in the obvious plan. Rollback
+ * needs the scene to hold a WorldState; the scene holds twenty-odd private fields instead; so the tempting move is to
+ * give it a `WorldState` up front and fill the fields in as they are migrated. Do that and the half-built object is
+ * indistinguishable from a real one — every unmigrated field reads as an empty array or a zeroed record, and the first
+ * thing to snapshot it would faithfully save a match with no minions in it and "restore" the game to that.
+ *
+ * So the scene holds a `Pick` instead. A field is added here only once the scene actually keeps it here, which means an
+ * unmigrated field is a COMPILE error at every use rather than a silent empty value. When this list names every field in
+ * WorldState the two types are the same type, `cloneWorldState(scene.world)` type-checks, and the adoption is done. Until
+ * then the type says exactly how far it has got.
+ *
+ * Migrated so far: the passive ledger and the held warden charges. Both were already exactly their WorldState shape,
+ * which is why they went first — a slice that also has to change shape (the target table is a `Map` in the scene and a
+ * `Record` here) hides a reshaping bug inside a move.
+ */
+export type AdoptedWorld = Pick<WorldState, 'passives' | 'wardenCharges'>;
+
+/** The adopted slice at match start. */
+export function createAdoptedWorld(): AdoptedWorld {
+  return { passives: createPassiveState(), wardenCharges: { ally: null, enemy: null } };
+}
+
+/**
+ * A fully independent copy of the adopted slice.
+ *
+ * {@link cloneWorldState} delegates to this rather than repeating the per-field calls, so a field cannot end up deep
+ * copied in one path and shared in the other — which is the failure mode that would show up as a rollback that mostly
+ * works.
+ */
+export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
+  return {
+    passives: clonePassiveState(world.passives),
+    wardenCharges: cloneWardenCharges(world.wardenCharges),
   };
 }
 

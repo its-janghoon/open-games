@@ -6,7 +6,9 @@ import {
   advanceEffects,
   advanceLives,
   advanceTimers,
+  cloneAdoptedWorld,
   cloneWorldState,
+  createAdoptedWorld,
   moveUnitToward,
   type MoveModifiers,
   type WorldBounds,
@@ -441,6 +443,94 @@ describe('cloneWorldState', () => {
     copy.lives.b.respawnsAt = null;
     expect(original.lives.b.phase).toBe('dead');
     expect(original.lives.b.respawnsAt).toBe(25);
+  });
+
+  describe('the adopted slice BattleScene owns', () => {
+    it('starts empty: no passive ledger entries and no held charges', () => {
+      expect(createAdoptedWorld()).toEqual({
+        passives: { counters: {}, deadlines: {} },
+        wardenCharges: { ally: null, enemy: null },
+      });
+    });
+
+    it('copies the adopted slice independently, one level down', () => {
+      const original = createAdoptedWorld();
+      original.passives.counters['ashborne:a:b'] = 2;
+      original.wardenCharges.ally = { acquiredAt: 1, expiresAt: 91 };
+
+      const copy = cloneAdoptedWorld(original);
+      copy.passives.counters['ashborne:a:b'] = 99;
+      copy.passives.deadlines['sunfire:a:b'] = 5;
+      copy.wardenCharges.ally!.expiresAt = 0;
+      copy.wardenCharges.enemy = { acquiredAt: 2, expiresAt: 92 };
+
+      expect(original.passives.counters['ashborne:a:b']).toBe(2);
+      expect(original.passives.deadlines['sunfire:a:b']).toBeUndefined();
+      expect(original.wardenCharges.ally!.expiresAt).toBe(91);
+      expect(original.wardenCharges.enemy).toBeNull();
+    });
+
+    /**
+     * cloneWorldState DELEGATES the adopted fields to cloneAdoptedWorld, so this guards the join rather than the
+     * per-field copying: if the spread were dropped or shadowed by an earlier key, these two fields would come back
+     * shared while every other test in this file still passed. A rollback that mostly works is the hardest kind to find.
+     */
+    it('routes the adopted fields through the same cloner the scene uses', () => {
+      const original = state();
+      original.passives.counters['duskarrow-distance:a'] = 250;
+      original.wardenCharges.enemy = { acquiredAt: 3, expiresAt: 93 };
+
+      const copy = cloneWorldState(original);
+      copy.passives.counters['duskarrow-distance:a'] = 0;
+      copy.wardenCharges.enemy!.expiresAt = 1;
+
+      expect(original.passives.counters['duskarrow-distance:a']).toBe(250);
+      expect(original.wardenCharges.enemy!.expiresAt).toBe(93);
+    });
+
+    /**
+     * The progress ledger, asserted rather than written in a comment that would go stale.
+     *
+     * The scene's `world` is a `Pick<WorldState, ...>` so an unmigrated field cannot be read as an empty array — it does
+     * not compile. This test names what is left, so widening the Pick is a deliberate edit with a failing test attached
+     * and nobody has to grep the scene to find out how far the adoption got. When `remaining` is empty the scene's state
+     * IS a WorldState and `cloneWorldState(scene.world)` type-checks.
+     */
+    it('names exactly the WorldState fields still to be adopted', () => {
+      const adopted = new Set(Object.keys(createAdoptedWorld()));
+      const remaining = Object.keys(state())
+        .filter((key) => !adopted.has(key))
+        .sort();
+
+      expect([...adopted].sort()).toEqual(['passives', 'wardenCharges']);
+      expect(remaining).toEqual([
+        'autoAttackers',
+        'baron',
+        'buffs',
+        'campMembers',
+        'camps',
+        'cooldowns',
+        'economy',
+        'effects',
+        'lives',
+        'minions',
+        'moveGoals',
+        'nextInsertionOrder',
+        'objectives',
+        'outcome',
+        'pendingImpacts',
+        'recalls',
+        'resources',
+        'simTime',
+        'structures',
+        'targets',
+        'teamFacts',
+        'tick',
+        'traps',
+        'units',
+        'waves',
+      ]);
+    });
   });
 });
 
