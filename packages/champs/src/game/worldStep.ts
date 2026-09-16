@@ -425,7 +425,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     traps: cloneTraps(state.traps),
     camps: cloneCampSpawns(state.camps),
     campMembers: cloneCampMembers(state.campMembers),
-    buffs: cloneBuffs(state.buffs),
     objectives: cloneObjectives(state.objectives),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
@@ -479,6 +478,7 @@ export type AdoptedWorld = Pick<
   | 'resources'
   | 'economy'
   | 'progression'
+  | 'buffs'
 >;
 
 /** The adopted slice at match start. */
@@ -501,6 +501,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     resources: {},
     economy: {},
     progression: {},
+    buffs: {},
   };
 }
 
@@ -538,6 +539,7 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     progression: Object.fromEntries(
       Object.entries(world.progression).map(([id, level]) => [id, { ...level }]),
     ),
+    buffs: cloneBuffs(world.buffs),
   };
 }
 
