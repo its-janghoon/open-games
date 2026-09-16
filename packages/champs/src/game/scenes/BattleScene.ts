@@ -30,7 +30,11 @@ import {
 import { decideAction, type AiIntent, type AiSnapshot } from '../ai';
 import { GhostRecorder, intentForAction, type PlayerAction } from '../ghostRecorder';
 import { ghostDecide, type GhostPolicy } from '../ghost';
-import { moveUnitToward as moveUnitTowardPure } from '../worldStep';
+import {
+  createAdoptedWorld,
+  moveUnitToward as moveUnitTowardPure,
+  type AdoptedWorld,
+} from '../worldStep';
 import type { GhostObservation } from '../ghost';
 import { ghostForOpponent, saveLearnedGhost } from '../../profile/ghostStore';
 import { loadProfile, saveProfile } from '../../profile';
@@ -38,7 +42,7 @@ import {
   lowestHpRatioHostile,
   resolveDashEndpoint,
 } from '../abilitySemantics';
-import { shouldDeployHeldWarden, type WardenCharge } from '../wardenPolicy';
+import { shouldDeployHeldWarden } from '../wardenPolicy';
 import {
   battleStore,
   DEFAULT_DIFFICULTY,
@@ -210,13 +214,7 @@ import {
 } from '../rift/objectives';
 import type { EpicMonster } from '../rift/economy';
 import { attemptPurchase } from '../inventory';
-import {
-  addTravelled,
-  createPassiveState,
-  openDashWindow,
-  passiveKeys,
-  type PassiveState,
-} from '../rift/passives';
+import { addTravelled, openDashWindow, passiveKeys } from '../rift/passives';
 import { scheduleDueWaves } from '../rift/waveSchedule';
 import {
   createLearningState,
@@ -645,7 +643,18 @@ export default class BattleScene extends Phaser.Scene {
    * The three it replaces could never be snapshotted; this shape can. The scene still owns it because BattleScene is
    * the authority for a real match, but the RULES that read and write it live in rift/passives.ts.
    */
-  private passives: PassiveState = createPassiveState();
+  /**
+   * The scene's authoritative state, as far as it has moved into WorldState's own shape.
+   *
+   * This is the container rollback needs. It is an {@link AdoptedWorld} and not a `WorldState` on purpose: the type names
+   * only the fields the scene actually keeps here, so a field that has not been migrated yet cannot be read as an empty
+   * array — it does not compile. Every slice that lands widens the Pick, and when it names every field the scene's state
+   * IS a WorldState and can be snapshotted and rewound.
+   *
+   * Field names are WorldState's, including the plural `wardenCharges` the scene used to spell singular, so that the
+   * final step is a type change and not a rename.
+   */
+  private world: AdoptedWorld = createAdoptedWorld();
   private passiveCounters = new Map<string, number>();
   private internalCooldowns = new Map<string, number>();
   /** Structure entities keyed by their pure graph id. */
@@ -737,7 +746,6 @@ export default class BattleScene extends Phaser.Scene {
   private recallStartedAt: number | null = null;
   private recallCancellation = '';
   private learning: LearningState = createLearningState();
-  private wardenCharge: Record<MapSide, WardenCharge | null> = { ally: null, enemy: null };
   private purchaseFeedbackSequence = 0;
   private lastPurchaseFeedback: { itemId: string; accepted: boolean; reason?: string; sequence: number } | undefined;
   private abilityKeys!: Record<CooldownKey, Phaser.Input.Keyboard.Key>;
@@ -831,7 +839,7 @@ export default class BattleScene extends Phaser.Scene {
     // ability-side stack counter. Only the basic-attack subset moved into PassiveState, so both are reset here.
     this.passiveCounters.clear();
     this.internalCooldowns.clear();
-    this.passives = createPassiveState();
+    this.world = createAdoptedWorld();
     this.structureById.clear();
     this.structureLines = [];
     this.playerCds = createCooldownState();
@@ -879,7 +887,6 @@ export default class BattleScene extends Phaser.Scene {
     this.recallStartedAt = null;
     this.recallCancellation = '';
     this.learning = createLearningState();
-    this.wardenCharge = { ally: null, enemy: null };
     this.purchaseFeedbackSequence = 0;
     this.lastPurchaseFeedback = undefined;
     this.elapsed = 0;
@@ -961,6 +968,23 @@ export default class BattleScene extends Phaser.Scene {
        * it directly exercises exactly the same code the UI would, without simulating a mouse.
        */
       command: (command: BattleCommand) => this.processCommand(command),
+      /**
+       * Every body's health and swing timer.
+       *
+       * `space()` already reports how MANY units there are; this reports what is happening to them, which is what a probe
+       * needs to prove the basic-attack path still lands damage. A unit suite cannot: it does not drive this scene, and
+       * the four callers of the attack path (the player, a bot champion, a minion and a camp monster) only meet in a
+       * running match.
+       */
+      bodies: () => this.allEntities.map((e) => ({
+        id: e.unit.id,
+        kind: e.unit.kind,
+        team: e.unit.team,
+        hp: Math.round(e.unit.hp),
+        maxHp: e.unit.maxHp,
+        attackCdRemaining: Number(e.unit.attackCdRemaining.toFixed(3)),
+        dead: e.unit.dead,
+      })),
       structureHp: () => this.allEntities
         .filter((e) => e.unit.kind === 'turret' || e.unit.kind === 'nexus')
         .map((e) => ({ id: e.unit.id, hp: Math.round(e.unit.hp) })),
@@ -2801,10 +2825,10 @@ export default class BattleScene extends Phaser.Scene {
         damageable: Boolean(targetEntity && this.isEntityDamageable(targetEntity)),
       },
       this.elapsed,
-      this.passives,
+      this.world.passives,
     );
     // Safe on both arms: a blocked plan returns the SAME state object, so this cannot bank a stack for a whiffed swing.
-    this.passives = plan.passives;
+    this.world.passives = plan.passives;
     if (plan.kind !== 'strike' || !targetEntity) return;
 
     if (attacker === this.player) {
@@ -3028,7 +3052,7 @@ export default class BattleScene extends Phaser.Scene {
           this.drawDashTrail(origin, caster.unit.pos, color);
           break;
         case 'openDashWindow':
-          this.passives = openDashWindow(this.passives, op.casterId, op.until);
+          this.world.passives = openDashWindow(this.world.passives, op.casterId, op.until);
           break;
         case 'smokeWindow':
           this.internalCooldowns.set(`nightveil-smoke:${op.casterId}`, op.until);
@@ -3200,7 +3224,7 @@ export default class BattleScene extends Phaser.Scene {
     const champion = this.entityForUnit(u);
     if (champion === this.player && travel > 0) this.recordLearning('move');
     if (champion?.champion?.id === 'duskarrow' && travel > 0) {
-      this.passives = addTravelled(this.passives, u.id, travel);
+      this.world.passives = addTravelled(this.world.passives, u.id, travel);
     }
     if (champion?.champion && travel > 0) champion.movedThisFrame = true;
   }
@@ -3680,9 +3704,9 @@ export default class BattleScene extends Phaser.Scene {
         : targetEntity.bot?.progress.level ?? 1;
       targetEntity.life = killChampion(targetEntity.life, this.elapsed, level, this.mode);
       if (targetEntity.champion?.id === 'duskarrow') {
-        this.passives = {
-          counters: { ...this.passives.counters, [passiveKeys.duskarrowDistance(target.id)]: 0 },
-          deadlines: { ...this.passives.deadlines },
+        this.world.passives = {
+          counters: { ...this.world.passives.counters, [passiveKeys.duskarrowDistance(target.id)]: 0 },
+          deadlines: { ...this.world.passives.deadlines },
         };
       }
       if (targetEntity === this.player) this.playerDeaths += 1;
@@ -3749,7 +3773,7 @@ export default class BattleScene extends Phaser.Scene {
         this.applyTeamChampionStats(sourceSide);
       } else {
         const reward = heraldReward();
-        this.wardenCharge[sourceSide] = {
+        this.world.wardenCharges[sourceSide] = {
           acquiredAt: this.elapsed,
           expiresAt: this.elapsed + reward.durationSeconds,
         };
@@ -3800,11 +3824,11 @@ export default class BattleScene extends Phaser.Scene {
   private tickHeldWardenPolicy(): void {
     // Expiry through the extracted step, deliberately separate from deciding whether to SPEND a charge: a lapse has to
     // happen on ticks where nothing wants to deploy.
-    this.wardenCharge = advanceWardenCharges(
-      { ally: this.wardenCharge.ally, enemy: this.wardenCharge.enemy },
+    this.world.wardenCharges = advanceWardenCharges(
+      { ally: this.world.wardenCharges.ally, enemy: this.world.wardenCharges.enemy },
       this.elapsed,
     );
-    const charge = this.wardenCharge.enemy;
+    const charge = this.world.wardenCharges.enemy;
     const targets = this.wardenTargets('enemy');
     const target = targets[0];
     const hasSiegePressure = Boolean(target && [...this.champions, ...this.minions].some(
@@ -3824,7 +3848,7 @@ export default class BattleScene extends Phaser.Scene {
   private useWardenCharge(sourceSide: MapSide, chosenTarget?: Entity) {
     const targets = this.wardenTargets(sourceSide);
     const plan = planWardenSpend({
-      charge: this.wardenCharge[sourceSide],
+      charge: this.world.wardenCharges[sourceSide],
       now: this.elapsed,
       orderedTargetIds: targets.map((entity) => entity.unit.id),
       preferredTargetId: chosenTarget?.unit.id ?? null,
@@ -3833,12 +3857,12 @@ export default class BattleScene extends Phaser.Scene {
     // structure is shielded is spent on a later tick instead of being thrown away.
     if (plan.kind === 'hold') return;
     if (plan.kind === 'lapsed') {
-      this.wardenCharge[sourceSide] = null;
+      this.world.wardenCharges[sourceSide] = null;
       return;
     }
     const target = targets.find((entity) => entity.unit.id === plan.targetId);
     if (!target) return;
-    this.wardenCharge[sourceSide] = null;
+    this.world.wardenCharges[sourceSide] = null;
     const source = sourceSide === 'ally' ? this.player.unit : this.enemy.unit;
     const result = applyDamageWithEffects(target.unit, target.effects, plan.rawDamage, this.elapsed);
     this.registerKill(source, target.unit, result.lethal);
@@ -4590,7 +4614,7 @@ export default class BattleScene extends Phaser.Scene {
       objectivePoints: this.teamFacts.ally.objectivePoints,
       wardenChargeSeconds: Math.max(
         0,
-        Math.ceil((this.wardenCharge.ally?.expiresAt ?? this.elapsed) - this.elapsed),
+        Math.ceil((this.world.wardenCharges.ally?.expiresAt ?? this.elapsed) - this.elapsed),
       ),
       playerLife: {
         phase: this.player.life!.phase,
