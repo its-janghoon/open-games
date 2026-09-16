@@ -9,7 +9,6 @@ import {
   advanceAttackCooldown,
   applyHeal,
   areHostile,
-  canBasicAttack,
   createCooldownState,
   distance,
   nearestTargetableEnemy,
@@ -172,6 +171,8 @@ import {
 } from '../rift/economy';
 import { composeTeams, enemyFacingSlot } from '../rift/teams';
 import { resolveAutoAttacks, type AutoAttacker } from '../rift/autoAttack';
+import { planBasicAttack } from '../rift/basicAttack';
+import { planWardenSpend, wardenTargetOrder } from '../rift/wardenSpend';
 import { planCast, type CastActor } from '../rift/abilityEffects';
 import { advanceBaron, advanceBuffs, advanceWardenCharges } from '../rift/fieldState';
 import { resolveTraps, trapIdFor } from '../rift/traps';
@@ -211,7 +212,6 @@ import type { EpicMonster } from '../rift/economy';
 import { attemptPurchase } from '../inventory';
 import {
   addTravelled,
-  basicAttackBonus,
   createPassiveState,
   openDashWindow,
   passiveKeys,
@@ -2769,44 +2769,55 @@ export default class BattleScene extends Phaser.Scene {
 
   private tryBasicAttackUnit(attacker: Entity, target: Unit) {
     const u = attacker.unit;
-    if (!canBasicAttack(u) || target.dead) return;
-    if (distance(u.pos, target.pos) > u.attackRange) return;
     const targetEntity = this.entityForUnit(target);
-    if (!targetEntity || !this.isEntityDamageable(targetEntity)) return;
     /**
-     * Passives resolved by the extracted pure step, not by mutating three Maps mid-attack.
+     * Every part of this that two peers must agree on now comes from {@link planBasicAttack}: whether the swing happens,
+     * how hard it lands, whether it flies or lands at once, and when the next one is allowed. The scene keeps what does
+     * not have to agree — the pose, the projectile line, the damage number — and keeps OWNING the passive state, since it
+     * is the authority for a real match. What it no longer owns is the rules.
      *
-     * The scene keeps its own PassiveState so it remains the authority for a real match; what it no longer keeps is its
-     * own copy of the rules. Previously duskarrow, nightveil, ashborne, sunfire and the red buff each read and wrote
-     * `passiveCounters` / `internalCooldowns` / `sunfireHitAt` inline here, which is both why none of it could be
-     * rewound and why the bonus depended on the order attacks happened to resolve.
+     * The gates are not re-checked here on purpose. Duplicating even the range test would put the melee/ranged boundary
+     * in two places, and a boundary that disagrees by a pixel is exactly the kind of divergence that only shows up in a
+     * networked match, several seconds after the tick that caused it.
      */
     const attackerItems = attacker === this.player ? this.ownedItems : attacker.bot?.ownedItems ?? [];
     const attackerBuffs = attacker === this.player ? this.playerBuffs : attacker.bot?.buffs;
-    const resolved = basicAttackBonus(
+    const plan = planBasicAttack(
       {
+        id: u.id,
         championId: attacker.champion?.id ?? null,
-        attackerId: u.id,
-        targetId: target.id,
-        now: this.elapsed,
+        pos: u.pos,
+        ad: u.ad,
+        attackRange: u.attackRange,
+        attackCdRemaining: u.attackCdRemaining,
+        attackSpeed: u.attackSpeed,
         items: attackerItems,
         hasRedBuff: attackerBuffs?.buffs.some((buff) => buff.kind === 'red') ?? false,
       },
+      {
+        id: target.id,
+        pos: target.pos,
+        dead: target.dead,
+        damageable: Boolean(targetEntity && this.isEntityDamageable(targetEntity)),
+      },
+      this.elapsed,
       this.passives,
     );
-    this.passives = resolved.state;
-    let ad = u.ad + resolved.bonusAd;
+    // Safe on both arms: a blocked plan returns the SAME state object, so this cannot bank a stack for a whiffed swing.
+    this.passives = plan.passives;
+    if (plan.kind !== 'strike' || !targetEntity) return;
+
     if (attacker === this.player) {
       this.cancelRecall('attack');
     }
     if (attacker.champion) {
       this.setChampionPose(attacker, 'attack', CHAMPION_POSE_HOLD_MS.attack, 1);
     }
-    if (u.attackRange > 220) {
+    if (plan.delivery === 'projectile') {
       const dueAt = this.queueTargetedImpact(
         attacker,
         target,
-        ad,
+        plan.rawDamage,
         0xf0e6d2,
         BASIC_PROJECTILE_SPEED,
       );
@@ -2817,9 +2828,9 @@ export default class BattleScene extends Phaser.Scene {
         Math.max(1, (dueAt - this.elapsed) * 1000),
       );
     } else {
-      this.applyTargetedDamage(attacker, targetEntity, ad, 0xf0e6d2);
+      this.applyTargetedDamage(attacker, targetEntity, plan.rawDamage, 0xf0e6d2);
     }
-    resetAttackCooldown(u);
+    u.attackCdRemaining = plan.attackCdRemaining;
   }
 
   private tryPlayerCast(slot: CooldownKey) {
@@ -3767,22 +3778,23 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private wardenTargets(sourceSide: MapSide): Entity[] {
-    const livingIds = new Set(
-      this.structures.filter((structure) => !structure.unit.dead).map((structure) => structure.unit.id),
+    // Ranking is authority — two peers that order the same three turrets differently batter different buildings from
+    // identical input — so the rule lives in wardenSpend.ts and this method only maps ids back to entities.
+    const order = wardenTargetOrder(
+      this.structures.map((structure) => ({
+        id: structure.unit.id,
+        team: structure.unit.team,
+        pos: structure.unit.pos,
+        dead: structure.unit.dead,
+      })),
+      sourceSide,
+      this.mode,
     );
-    return this.structures
-      .filter(
-        (structure) =>
-          structure.unit.team !== sourceSide &&
-          !structure.unit.dead &&
-          isStructureTargetable(structure.unit.id, livingIds, this.mode),
-      )
-      .sort(
-        (a, b) =>
-          distance(a.unit.pos, BASE_POSITIONS[sourceSide]) -
-            distance(b.unit.pos, BASE_POSITIONS[sourceSide]) ||
-          a.unit.id.localeCompare(b.unit.id),
-      );
+    const byId = new Map(this.structures.map((structure) => [structure.unit.id, structure]));
+    return order.flatMap((id) => {
+      const entity = byId.get(id);
+      return entity ? [entity] : [];
+    });
   }
 
   private tickHeldWardenPolicy(): void {
@@ -3810,18 +3822,25 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private useWardenCharge(sourceSide: MapSide, chosenTarget?: Entity) {
-    const charge = this.wardenCharge[sourceSide];
-    if (!charge || charge.expiresAt <= this.elapsed) {
+    const targets = this.wardenTargets(sourceSide);
+    const plan = planWardenSpend({
+      charge: this.wardenCharge[sourceSide],
+      now: this.elapsed,
+      orderedTargetIds: targets.map((entity) => entity.unit.id),
+      preferredTargetId: chosenTarget?.unit.id ?? null,
+    });
+    // `hold` deliberately leaves the charge standing: only time takes one away, so a warden held while every legal
+    // structure is shielded is spent on a later tick instead of being thrown away.
+    if (plan.kind === 'hold') return;
+    if (plan.kind === 'lapsed') {
       this.wardenCharge[sourceSide] = null;
       return;
     }
-    const source = sourceSide === 'ally' ? this.player.unit : this.enemy.unit;
-    const reward = heraldReward();
-    const targets = this.wardenTargets(sourceSide);
-    const target = chosenTarget && targets.includes(chosenTarget) ? chosenTarget : targets[0];
+    const target = targets.find((entity) => entity.unit.id === plan.targetId);
     if (!target) return;
     this.wardenCharge[sourceSide] = null;
-    const result = applyDamageWithEffects(target.unit, target.effects, reward.structureDamage, this.elapsed);
+    const source = sourceSide === 'ally' ? this.player.unit : this.enemy.unit;
+    const result = applyDamageWithEffects(target.unit, target.effects, plan.rawDamage, this.elapsed);
     this.registerKill(source, target.unit, result.lethal);
     this.onDamage(target, target.unit.pos, result.dealt, 0xc18cff, result.lethal, {
       fromPos: source.pos,
