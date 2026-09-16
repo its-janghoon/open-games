@@ -71,6 +71,7 @@ import {
   resolveMatch,
   type MatchResolution,
 } from '../matchResolution';
+import { isDecided, RECALL_SECONDS } from '../rift/matchFlow';
 import {
   DIFFICULTY_CONFIG,
   type Difficulty,
@@ -752,7 +753,14 @@ export default class BattleScene extends Phaser.Scene {
   private aimPoint: Vec2 | null = null;
   private aimPreview?: Phaser.GameObjects.Graphics;
   private pauseReasons = new Set<'manual' | 'settings' | 'hidden'>();
-  private recallStartedAt: number | null = null;
+  /**
+   * The recall CHANNEL is `world.recalls`; this string is not.
+   *
+   * `recallCancellation` names why the last channel broke ("attack", "ability"), and it exists only to be shown in the
+   * HUD — no rule reads it and no peer needs to agree about it. Leaving presentation out of the snapshot is as much a part
+   * of getting the state right as putting authority in: a rewind that restored a feedback string would be spending
+   * snapshot bytes on a caption.
+   */
   private recallCancellation = '';
   private learning: LearningState = createLearningState();
   private purchaseFeedbackSequence = 0;
@@ -780,7 +788,16 @@ export default class BattleScene extends Phaser.Scene {
   private simulationAccumulator = 0;
   private scheduledCommands: ScheduledBattleCommand[] = [];
   private nextHudAt = 0;
-  private ended = false;
+  /**
+   * Whether the match is over — DERIVED from `world.outcome`, not stored.
+   *
+   * The boolean it replaces was a lossy copy of a richer state: `MatchOutcome` is `ongoing | decided{winner, reason}`, so
+   * a `true` said the match had ended while the winner lived only in the payload the scene emitted on its way out. Now
+   * the winner and the reason are in the snapshot, and there is no second source of truth that can disagree with it.
+   */
+  private get matchEnded(): boolean {
+    return isDecided(this.world.outcome);
+  }
   /** Guards the cosmetic kill slow-mo so rapid kills cannot stack/strand it. */
   private slowMoActive = false;
   /**
@@ -894,7 +911,6 @@ export default class BattleScene extends Phaser.Scene {
     this.aimPoint = null;
     this.aimPreview?.clear();
     this.pauseReasons.clear();
-    this.recallStartedAt = null;
     this.recallCancellation = '';
     this.learning = createLearningState();
     this.purchaseFeedbackSequence = 0;
@@ -902,7 +918,6 @@ export default class BattleScene extends Phaser.Scene {
     this.simulationAccumulator = 0;
     this.scheduledCommands = [];
     this.nextHudAt = 0;
-    this.ended = false;
     this.stats = { championKills: 0, minionKills: 0, damageDealt: 0 };
     const authorityMatchRequest: AuthorityMatchRequest = {
       matchId: this.matchId,
@@ -1910,7 +1925,7 @@ export default class BattleScene extends Phaser.Scene {
     const graphics = this.aimPreview;
     const slot = this.armedAbility;
     const aim = this.aimPoint;
-    if (!graphics || !slot || !aim || !this.player || this.ended) {
+    if (!graphics || !slot || !aim || !this.player || this.matchEnded) {
       graphics?.clear();
       return;
     }
@@ -1959,10 +1974,10 @@ export default class BattleScene extends Phaser.Scene {
   // ---- Main loop -----------------------------------------------------------
 
   update(_time: number, deltaMs: number) {
-    if (this.ended || !this.sceneReady) return;
+    if (this.matchEnded || !this.sceneReady) return;
     this.simulationAccumulator += Math.max(0, deltaMs / 1000);
     this.ingestCommands();
-    if (this.pauseReasons.size > 0 || this.ended) {
+    if (this.pauseReasons.size > 0 || this.matchEnded) {
       this.simulationAccumulator = 0;
       this.syncAimPreview();
       return;
@@ -1973,7 +1988,7 @@ export default class BattleScene extends Phaser.Scene {
     while (
       this.simulationAccumulator + Number.EPSILON >= SIMULATION_TICK_SECONDS &&
       steps < MAX_STEPS_PER_RENDER &&
-      !this.ended
+      !this.matchEnded
     ) {
       this.simulationAccumulator -= SIMULATION_TICK_SECONDS;
       this.stepAuthority();
@@ -1995,7 +2010,7 @@ export default class BattleScene extends Phaser.Scene {
     this.world.simTime = Math.min(this.rules.hardCapSeconds, this.world.tick * SIMULATION_TICK_SECONDS);
     const dt = SIMULATION_TICK_SECONDS;
     this.processScheduledCommands();
-    if (this.ended || this.pauseReasons.size > 0) return;
+    if (this.matchEnded || this.pauseReasons.size > 0) return;
     this.tickRecall();
 
     this.advanceChampionLives();
@@ -2033,7 +2048,7 @@ export default class BattleScene extends Phaser.Scene {
     }
     this.regenAndTick(dt);
     this.checkWinLose();
-    if (!this.ended && this.world.simTime >= this.nextHudAt) {
+    if (!this.matchEnded && this.world.simTime >= this.nextHudAt) {
       this.pushHud();
       this.nextHudAt = this.world.simTime + HUD_INTERVAL_SECONDS;
     }
@@ -2174,24 +2189,40 @@ export default class BattleScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * When the player's recall began, or null.
+   *
+   * A read-through accessor rather than a field, because the channel now lives in `world.recalls` — a `RecallTable`
+   * keyed by participant, which is the shape a networked match needs (every champion can recall, not just the local
+   * player). The scene still only ever writes the local player's entry; nothing else changed.
+   *
+   * `?? null` collapses "no entry" and "not recalling", exactly as the pure `advanceRecalls` treats them.
+   */
+  private get playerRecallStartedAt(): number | null {
+    return this.world.recalls[this.player.unit.id] ?? null;
+  }
+
   private startRecall() {
     if (!isChampionPresent(this.player.life!) || this.inBase(this.player.unit, 'ally')) return;
-    this.recallStartedAt = this.world.simTime;
+    this.world.recalls[this.player.unit.id] = this.world.simTime;
     this.recallCancellation = '';
     this.playerOrder = 'stop';
     this.moveTarget = null;
   }
 
   private cancelRecall(reason: string) {
-    if (this.recallStartedAt === null) return;
-    this.recallStartedAt = null;
+    if (this.playerRecallStartedAt === null) return;
+    this.world.recalls[this.player.unit.id] = null;
     this.recallCancellation = reason;
   }
 
   private tickRecall() {
-    if (this.recallStartedAt === null || this.world.simTime - this.recallStartedAt < 6) return;
+    const startedAt = this.playerRecallStartedAt;
+    // RECALL_SECONDS rather than a literal 6. Both were 6, which is the problem: the same duration written in two files
+    // agrees until somebody changes one, and a recall that completes at different times on two peers is a desync.
+    if (startedAt === null || this.world.simTime - startedAt < RECALL_SECONDS) return;
     this.player.unit.pos = { ...BASE_POSITIONS.ally };
-    this.recallStartedAt = null;
+    this.world.recalls[this.player.unit.id] = null;
   }
 
   private recordLearning(action: LearningAction) {
@@ -2881,7 +2912,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private tryPlayerCast(slot: CooldownKey) {
     if (
-      this.ended || this.pauseReasons.size > 0 || this.hasModalFocus() ||
+      this.matchEnded || this.pauseReasons.size > 0 || this.hasModalFocus() ||
       !isChampionPresent(this.player.life!) || this.player.stunned > 0
     ) return;
     this.cancelRecall('ability');
@@ -2891,7 +2922,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private tryPlayerCastAt(slot: CooldownKey, aim: Vec2) {
     if (
-      this.ended || this.pauseReasons.size > 0 || this.hasModalFocus() ||
+      this.matchEnded || this.pauseReasons.size > 0 || this.hasModalFocus() ||
       !isChampionPresent(this.player.life!) || this.player.stunned > 0
     ) return;
     this.cancelRecall('ability');
@@ -4593,7 +4624,7 @@ export default class BattleScene extends Phaser.Scene {
       mode: this.mode,
       matchKind: this.matchKind,
       difficulty: this.difficulty,
-      lifecycle: this.ended ? 'ended' : this.pauseReasons.size > 0 ? 'paused' : 'running',
+      lifecycle: this.matchEnded ? 'ended' : this.pauseReasons.size > 0 ? 'paused' : 'running',
       pauseReasons: [...this.pauseReasons],
       playerChampionId: this.playerChampion.id,
       enemyChampionId: this.enemyChampion.id,
@@ -4656,8 +4687,14 @@ export default class BattleScene extends Phaser.Scene {
         hardCapSecondsRemaining: Math.max(0, Math.ceil(this.rules.hardCapSeconds - this.world.simTime)),
       },
       recall: {
-        channeling: this.recallStartedAt !== null,
-        remaining: this.recallStartedAt === null ? 0 : Math.max(0, Math.round((6 - (this.world.simTime - this.recallStartedAt)) * 10) / 10),
+        channeling: this.playerRecallStartedAt !== null,
+        remaining:
+          this.playerRecallStartedAt === null
+            ? 0
+            : Math.max(
+                0,
+                Math.round((RECALL_SECONDS - (this.world.simTime - this.playerRecallStartedAt)) * 10) / 10,
+              ),
         ...(this.recallCancellation ? { cancellation: this.recallCancellation } : {}),
       },
       ...(this.matchKind === 'tutorial' ? {
@@ -4709,7 +4746,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private checkWinLose() {
-    if (this.ended) return;
+    if (this.matchEnded) return;
     const resolution = resolveMatch(
       {
         elapsedSeconds: this.world.simTime,
@@ -4748,7 +4785,7 @@ export default class BattleScene extends Phaser.Scene {
    * See ghostRecorder for why a lateral move is also silent.
    */
   private recordGhostObservation(command: BattleCommand): void {
-    if (this.ended || !this.player) return;
+    if (this.matchEnded || !this.player) return;
 
     let action: PlayerAction;
     if (command.type === 'move-to' || command.type === 'attack-move-to' || command.type === 'target-at') {
@@ -4812,7 +4849,18 @@ export default class BattleScene extends Phaser.Scene {
     const result = resolution.winner === 'ally' ? 'win' : resolution.winner === 'enemy' ? 'loss' : 'draw';
     this.persistLearnedGhost();
     this.recordLearning('victory-condition');
-    this.ended = true;
+    // The winner and the reason go INTO the state rather than only into the outcome payload the scene emits.
+    /**
+     * `?? 'draw'` narrows a type, it does not invent a result: every resolveMatch branch that sets a reason also sets a
+     * winner (`winnerFromSnapshot` returns `Exclude<MatchWinner, null>`), and only the ongoing branch returns null for
+     * both. Written as a coalesce rather than a non-null assertion so an impossible resolution degrades to a draw instead
+     * of crashing a match that has already finished.
+     */
+    this.world.outcome = {
+      kind: 'decided',
+      winner: resolution.winner ?? 'draw',
+      reason: resolution.reason ?? 'unknown',
+    };
     this.pushHud();
     audio.play(result === 'win' ? 'victory' : 'defeat');
     if (!this.reducedMotion) {
@@ -4846,8 +4894,8 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private endAbandoned() {
-    if (this.ended) return;
-    this.ended = true;
+    if (this.matchEnded) return;
+    this.world.outcome = { kind: 'decided', winner: 'draw', reason: 'abandoned' };
     this.pushHud();
     const outcome: BattleOutcome = {
       matchId: this.matchId,
