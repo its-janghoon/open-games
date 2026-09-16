@@ -522,7 +522,6 @@ interface Entity {
   hpBar?: Phaser.GameObjects.Rectangle;
   /** Remaining stun seconds; entity cannot act while > 0. */
   stunned: number;
-  effects: EffectState;
   /** For structures: the pure graph node (kind, lane, shields). */
   node?: StructureNode;
   /** For minions: pure rift minion state (lane path progress). */
@@ -1613,7 +1612,6 @@ export default class BattleScene extends Phaser.Scene {
       shadow,
       heightPx,
       stunned: 0,
-      effects: createEffectState(),
       champion,
       championPose: 'idle',
       poseLockedUntil: 0,
@@ -1714,7 +1712,7 @@ export default class BattleScene extends Phaser.Scene {
     const body = this.makeBillboard(key, size);
     const container = this.add.container(pos.x, pos.y, [body]);
     const shadow = this.makeShadow(size.width * 0.8);
-    const entity: Entity = { unit, container, body, shadow, heightPx, stunned: 0, effects: createEffectState(), node };
+    const entity: Entity = { unit, container, body, shadow, heightPx, stunned: 0, node };
     this.attachHpBar(entity, size.height + 8);
     this.addEntity(entity);
     return entity;
@@ -2248,6 +2246,20 @@ export default class BattleScene extends Phaser.Scene {
     this.world.moveGoals[this.player.unit.id] = goal ? { ...goal } : null;
   }
 
+  /**
+   * This entity's active effects, from the one Record the snapshot carries.
+   *
+   * Every entity has them -- champions, structures, minions, camp members and monsters -- so unlike `lifeFor` this always
+   * returns a state and creates one on demand rather than being seeded at five separate spawn sites.
+   */
+  private effectsFor(entity: Entity): EffectState {
+    const existing = this.world.effects[entity.unit.id];
+    if (existing) return existing;
+    const fresh = createEffectState();
+    this.world.effects[entity.unit.id] = fresh;
+    return fresh;
+  }
+
   /** How far along its lane path a bot has marched. Real state: see `WorldState.lanePush`. */
   private lanePushFor(entity: Entity): number {
     return this.world.lanePush[entity.unit.id] ?? 0;
@@ -2555,7 +2567,6 @@ export default class BattleScene extends Phaser.Scene {
       shadow,
       heightPx: MINION_HEIGHT_PX,
       stunned: 0,
-      effects: createEffectState(),
       rift,
       path: laneWaypoints(lane, team),
       minionType: type,
@@ -2571,8 +2582,8 @@ export default class BattleScene extends Phaser.Scene {
     for (const e of this.allEntities) {
       // The single per-tick expiry. Everything else READS effects; see effects.ts for
       // why a mutating query is a rollback hazard.
-      expireEffects(e.effects, this.world.simTime);
-      const pull = readPull(e.effects, this.world.simTime);
+      expireEffects(this.effectsFor(e), this.world.simTime);
+      const pull = readPull(this.effectsFor(e), this.world.simTime);
       if (pull && !e.unit.dead) {
         const pullDistance = distance(e.unit.pos, pull.destination);
         if (pullDistance > 1) {
@@ -2581,7 +2592,7 @@ export default class BattleScene extends Phaser.Scene {
           e.unit.pos.y = this.clampY(e.unit.pos.y + ((pull.destination.y - e.unit.pos.y) / pullDistance) * travel);
         }
       }
-      for (const burn of [...e.effects.burns]) {
+      for (const burn of [...this.effectsFor(e).burns]) {
         burn.accumulator += burn.rawDamagePerSecond * dt;
         const wholeDamage = Math.floor(burn.accumulator);
         const source = this.entityById.get(burn.sourceId);
@@ -3228,16 +3239,16 @@ export default class BattleScene extends Phaser.Scene {
           break;
         }
         case 'shield':
-          applyShield(target.effects, op.key, op.amount, op.expiresAt);
+          applyShield(this.effectsFor(target), op.key, op.amount, op.expiresAt);
           break;
         case 'armor':
-          applyArmor(target.effects, op.key, op.amount, op.expiresAt);
+          applyArmor(this.effectsFor(target), op.key, op.amount, op.expiresAt);
           break;
         case 'movementBuff':
-          applyMovementBuff(target.effects, op.key, op.percent, op.expiresAt);
+          applyMovementBuff(this.effectsFor(target), op.key, op.percent, op.expiresAt);
           break;
         case 'cleanseSlows':
-          cleanseSlows(target.effects);
+          cleanseSlows(this.effectsFor(target));
           break;
         case 'trap':
           this.traps.push({
@@ -3357,14 +3368,14 @@ export default class BattleScene extends Phaser.Scene {
     // Pure reads. These used to be activePull/strongestSlow/strongestMovementBuff, each
     // of which expired effects as a side effect - three mutating queries per unit per
     // frame. Expiry now happens once per tick in advanceEffects(); see effects.ts.
-    if (entity && readPull(entity.effects, this.world.simTime)) return;
+    if (entity && readPull(this.effectsFor(entity), this.world.simTime)) return;
     const smokeMultiplier = entity?.champion?.id === 'nightveil' &&
       (this.internalCooldowns.get(`nightveil-smoke:${u.id}`) ?? 0) > this.world.simTime ? 1.2 : 1;
     const huntingBonus = entity?.champion?.id === 'grimtrail' && this.champions.some(
       (candidate) => areHostile(u.team, candidate.unit.team) && !candidate.unit.dead &&
         candidate.unit.hp / candidate.unit.maxHp < 0.35 && distance(u.pos, candidate.unit.pos) <= 700,
     ) ? 25 : 0;
-    const effectState = entity?.effects;
+    const effectState = entity ? this.effectsFor(entity) : undefined;
     // The arithmetic itself lives in game/worldStep so a headless rollback step and the
     // scene cannot drift apart. The scene keeps deciding WHAT the modifiers are; the
     // extracted function decides what they do.
@@ -3555,7 +3566,6 @@ export default class BattleScene extends Phaser.Scene {
       shadow,
       heightPx: 10,
       stunned: 0,
-      effects: createEffectState(),
       objectiveId: id,
     };
     this.attachHpBar(entity, size.height + 8);
@@ -3606,8 +3616,7 @@ export default class BattleScene extends Phaser.Scene {
         shadow,
         heightPx: 5,
         stunned: 0,
-        effects: createEffectState(),
-        campId: camp.id,
+          campId: camp.id,
         campMemberKey: member.key,
       };
       this.attachHpBar(entity, size.height * member.scale + 7);
@@ -3771,22 +3780,22 @@ export default class BattleScene extends Phaser.Scene {
     const sourceUnit = 'unit' in source ? source.unit : source;
     if (!this.canDamageTarget(sourceUnit, target)) return;
     const hpPctBefore = target.unit.maxHp > 0 ? target.unit.hp / target.unit.maxHp : 0;
-    const result = applyDamageWithEffects(target.unit, target.effects, rawDamage, this.world.simTime);
+    const result = applyDamageWithEffects(target.unit, this.effectsFor(target), rawDamage, this.world.simTime);
     const sourceEntity = this.entityById.get(sourceUnit.id);
     if (options.ability && !options.periodic && sourceEntity?.champion?.id === 'embermage' && !result.lethal) {
       const burnTotal = 25 + (sourceEntity.abilityPower ?? 0) * 0.1;
-      applyBurn(target.effects, sourceUnit.id, burnTotal / 3, this.world.simTime + 3);
+      applyBurn(this.effectsFor(target), sourceUnit.id, burnTotal / 3, this.world.simTime + 3);
     }
     if (
       options.ability && sourceEntity?.champion?.id === 'frostquill' &&
       (options.stunDuration ?? 0) === 0 && !result.lethal
-    ) applySlow(target.effects, `frostquill:${sourceUnit.id}`, 0.2, this.world.simTime + 1.5);
+    ) applySlow(this.effectsFor(target), `frostquill:${sourceUnit.id}`, 0.2, this.world.simTime + 1.5);
     if ((options.slowPercent ?? 0) > 0 && !result.lethal) {
-      applySlow(target.effects, `ability:${sourceUnit.id}`, options.slowPercent!, this.world.simTime + (options.slowDuration ?? 0));
+      applySlow(this.effectsFor(target), `ability:${sourceUnit.id}`, options.slowPercent!, this.world.simTime + (options.slowDuration ?? 0));
     }
     if ((options.pullDuration ?? 0) > 0 && !result.lethal) {
       applyPull(
-        target.effects,
+        this.effectsFor(target),
         `ability:${sourceUnit.id}`,
         sourceUnit.pos,
         600,
@@ -3796,7 +3805,7 @@ export default class BattleScene extends Phaser.Scene {
     const sourceBuffs = sourceEntity ? this.buffsFor(sourceEntity) : undefined;
     if (
       !options.ability && sourceBuffs?.buffs.some((buff) => buff.kind === 'red') && !result.lethal
-    ) applySlow(target.effects, `red-buff:${sourceUnit.id}`, 0.2, this.world.simTime + 2);
+    ) applySlow(this.effectsFor(target), `red-buff:${sourceUnit.id}`, 0.2, this.world.simTime + 2);
 
     const targetItems = target === this.player ? this.ownedItems : target.bot?.ownedItems ?? [];
     const hpPctAfter = target.unit.maxHp > 0 ? target.unit.hp / target.unit.maxHp : 0;
@@ -3805,7 +3814,7 @@ export default class BattleScene extends Phaser.Scene {
       targetItems.includes('aegisColossus') && hpPctBefore > 0.3 && hpPctAfter <= 0.3 &&
       (this.internalCooldowns.get(aegisKey) ?? 0) <= this.world.simTime && !result.lethal
     ) {
-      applyShield(target.effects, 'aegisColossus', 200, this.world.simTime + 4);
+      applyShield(this.effectsFor(target), 'aegisColossus', 200, this.world.simTime + 4);
       this.internalCooldowns.set(aegisKey, this.world.simTime + 45);
     }
     const ironholdKey = `ironhold-passive:${target.unit.id}`;
@@ -3813,7 +3822,7 @@ export default class BattleScene extends Phaser.Scene {
       target.champion?.id === 'ironhold' && hpPctBefore > 0.35 && hpPctAfter <= 0.35 &&
       (this.internalCooldowns.get(ironholdKey) ?? 0) <= this.world.simTime && !result.lethal
     ) {
-      applyArmor(target.effects, ironholdKey, 25, this.world.simTime + 3);
+      applyArmor(this.effectsFor(target), ironholdKey, 25, this.world.simTime + 3);
       this.internalCooldowns.set(ironholdKey, this.world.simTime + 12);
     }
     if (target.champion?.id === 'nightveil' && result.dealt > 0) {
@@ -4030,7 +4039,7 @@ export default class BattleScene extends Phaser.Scene {
     if (!target) return;
     this.world.wardenCharges[sourceSide] = null;
     const source = sourceSide === 'ally' ? this.player.unit : this.enemy.unit;
-    const result = applyDamageWithEffects(target.unit, target.effects, plan.rawDamage, this.world.simTime);
+    const result = applyDamageWithEffects(target.unit, this.effectsFor(target), plan.rawDamage, this.world.simTime);
     this.registerKill(source, target.unit, result.lethal);
     this.onDamage(target, target.unit.pos, result.dealt, 0xc18cff, result.lethal, {
       fromPos: source.pos,

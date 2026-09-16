@@ -5,10 +5,12 @@ import { noBaronBuff } from './rift/objectives';
 import {
   advanceEffects,
   advanceLives,
+  advanceClock,
   advanceTimers,
   cloneAdoptedWorld,
   cloneWorldState,
   createAdoptedWorld,
+  expireAllEffects,
   moveUnitToward,
   type MoveModifiers,
   type WorldBounds,
@@ -475,6 +477,7 @@ describe('cloneWorldState', () => {
         lives: {},
         moveGoals: {},
         lanePush: {},
+        effects: {},
       });
     });
 
@@ -535,6 +538,29 @@ describe('cloneWorldState', () => {
     });
 
     /**
+     * The split that makes the double-advance impossible rather than merely discouraged.
+     *
+     * BattleScene derives `simTime` from the tick, so it must be able to sweep effects WITHOUT being handed a clock
+     * advance it did not ask for. Before the split there was one function doing both and the only protection was a
+     * comment.
+     */
+    it('expireAllEffects sweeps without moving the clock, and advanceClock moves it without sweeping', () => {
+      const swept = state();
+      swept.effects.a.slows = [{ source: 'w', percent: 0.3, expiresAt: swept.simTime - 1 }];
+      const at = swept.simTime;
+      expireAllEffects(swept);
+      expect(swept.simTime).toBe(at);
+      expect(swept.effects.a.slows).toEqual([]);
+
+      const ticked = state();
+      ticked.effects.a.slows = [{ source: 'w', percent: 0.3, expiresAt: ticked.simTime - 1 }];
+      advanceClock(ticked, 0.25);
+      expect(ticked.simTime).toBe(at + 0.25);
+      // Still there: moving time does not sweep, so a caller cannot get expiry it did not ask for either.
+      expect(ticked.effects.a.slows).toHaveLength(1);
+    });
+
+    /**
      * The progress ledger, asserted rather than written in a comment that would go stale.
      *
      * The scene's `world` is a `Pick<WorldState, ...>` so an unmigrated field cannot be read as an empty array — it does
@@ -554,6 +580,7 @@ describe('cloneWorldState', () => {
         'cooldowns',
         'dragonStacks',
         'economy',
+        'effects',
         'lanePush',
         'lives',
         'moveGoals',
@@ -575,7 +602,6 @@ describe('cloneWorldState', () => {
         'autoAttackers',
         'campMembers',
         'camps',
-        'effects',
         'minions',
         'objectives',
         'structures',
