@@ -488,7 +488,6 @@ interface BotState {
   champion: Champion;
   side: MapSide;
   ownedItems: string[];
-  buffs: BuffState;
   currentIntent: AiIntent;
   pendingIntent: AiIntent | null;
   intentReadyAt: number;
@@ -693,7 +692,6 @@ export default class BattleScene extends Phaser.Scene {
    */
 
   // Buffs / objectives (ally-team perspective drives HUD + player stats).
-  private playerBuffs: BuffState = createBuffState();
   /**
    * The baron buff and the dragon stacks now live in `world.baron` / `world.dragonStacks`, one side table each rather
    * than four scalar fields.
@@ -878,7 +876,6 @@ export default class BattleScene extends Phaser.Scene {
     this.structureLines = [];
     this.ownedItems = [];
     this.playerDeaths = 0;
-    this.playerBuffs = createBuffState();
     this.world.baron.ally = noBaronBuff();
     this.world.baron.enemy = noBaronBuff();
     this.objectives = this.rules.objectives.enabled
@@ -1283,7 +1280,6 @@ export default class BattleScene extends Phaser.Scene {
             champion: slot.champion,
             side,
             ownedItems: [],
-            buffs: createBuffState(),
             currentIntent: 'approach',
             pendingIntent: null,
             intentReadyAt: 0,
@@ -2010,7 +2006,7 @@ export default class BattleScene extends Phaser.Scene {
     for (const c of this.champions) {
       if (!c.bot) continue;
       tickCooldowns(this.cooldownsFor(c), dt);
-      const botBlueRegen = c.bot.buffs.buffs.some((buff) => buff.kind === 'blue')
+      const botBlueRegen = this.buffsFor(c).buffs.some((buff) => buff.kind === 'blue')
         ? BUFF_EFFECTS.blue.resourceRegenPerSecond : 0;
       this.world.resources[c.unit.id] = regenerateResource(this.resourceFor(c), dt, botBlueRegen);
     }
@@ -2238,6 +2234,23 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   /**
+   * This entity's jungle buffs, from the one Record the snapshot carries.
+   *
+   * Every champion is keyed by unit id, including the human. The old arrangement keyed the player as the literal
+   * `'player'` because their buffs lived on a scene field rather than in a record, and the comment there worried that a
+   * unit-id key "would collide the day the player's id is reused". Uniqueness of unit ids is already required -- the
+   * scene's own `entityById` map depends on it -- so once every champion is in ONE record the special case has nothing
+   * left to protect. The key is unchanged in practice: the player's unit id is `player`.
+   */
+  private buffsFor(entity: Entity): BuffState {
+    const existing = this.world.buffs[entity.unit.id];
+    if (existing) return existing;
+    const fresh = createBuffState();
+    this.world.buffs[entity.unit.id] = fresh;
+    return fresh;
+  }
+
+  /**
    * This entity's level and banked XP, from the one Record the snapshot carries.
    *
    * Level is not a scoreboard number: `statsForLevel` scales health, attack damage, armour and ability power off it, so it
@@ -2322,7 +2335,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private blueBuffRegen(): number {
-    return this.playerBuffs.buffs.some((b) => b.kind === 'blue')
+    return this.buffsFor(this.player).buffs.some((b) => b.kind === 'blue')
       ? BUFF_EFFECTS.blue.resourceRegenPerSecond
       : 0;
   }
@@ -2364,19 +2377,7 @@ export default class BattleScene extends Phaser.Scene {
      * The player is keyed 'player' rather than by unit id because the human's buffs live on a scene field, not on a bot
      * state — a detail worth naming, since keying it by unit id would collide the day the player's id is reused.
      */
-    const expired = advanceBuffs(
-      {
-        player: this.playerBuffs,
-        ...Object.fromEntries(
-          this.champions.filter((c) => c.bot).map((c) => [c.unit.id, c.bot!.buffs]),
-        ),
-      },
-      this.world.simTime,
-    );
-    this.playerBuffs = expired.player;
-    for (const champion of this.champions) {
-      if (champion.bot) champion.bot.buffs = expired[champion.unit.id] ?? champion.bot.buffs;
-    }
+    this.world.buffs = advanceBuffs(this.world.buffs, this.world.simTime);
     const allyWasActive = this.world.baron.ally.active;
     const enemyWasActive = this.world.baron.enemy.active;
     this.world.baron = advanceBaron(this.world.baron, this.world.simTime);
@@ -2934,7 +2935,7 @@ export default class BattleScene extends Phaser.Scene {
      * networked match, several seconds after the tick that caused it.
      */
     const attackerItems = attacker === this.player ? this.ownedItems : attacker.bot?.ownedItems ?? [];
-    const attackerBuffs = attacker === this.player ? this.playerBuffs : attacker.bot?.buffs;
+    const attackerBuffs = this.buffsFor(attacker);
     const plan = planBasicAttack(
       {
         id: u.id,
@@ -3096,9 +3097,8 @@ export default class BattleScene extends Phaser.Scene {
     const base = this.abilityBySlot(champion, slot).cooldown;
     const itemIds = caster === this.player ? this.ownedItems : caster.bot?.ownedItems ?? [];
     let cdr = totalModifiers(itemIds).cooldownReduction;
-    if (caster === this.player && this.playerBuffs.buffs.some((b) => b.kind === 'blue')) {
-      cdr += BUFF_EFFECTS.blue.cooldownReduction;
-    } else if (caster.bot?.buffs.buffs.some((buff) => buff.kind === 'blue')) {
+    // One branch, not two: this used to ask about the player's blue buff and then about a bot's, with identical bodies.
+    if (this.buffsFor(caster).buffs.some((b) => b.kind === 'blue')) {
       cdr += BUFF_EFFECTS.blue.cooldownReduction;
     }
     return base * (1 - Math.min(0.5, cdr));
@@ -3759,7 +3759,7 @@ export default class BattleScene extends Phaser.Scene {
         this.world.simTime + options.pullDuration!,
       );
     }
-    const sourceBuffs = sourceEntity === this.player ? this.playerBuffs : sourceEntity?.bot?.buffs;
+    const sourceBuffs = sourceEntity ? this.buffsFor(sourceEntity) : undefined;
     if (
       !options.ability && sourceBuffs?.buffs.some((buff) => buff.kind === 'red') && !result.lethal
     ) applySlow(target.effects, `red-buff:${sourceUnit.id}`, 0.2, this.world.simTime + 2);
@@ -3878,7 +3878,7 @@ export default class BattleScene extends Phaser.Scene {
           this.awardBounty(sourceEntity, runtime.camp.bounty);
           runtime.nextSpawnAt = this.world.simTime + runtime.camp.respawnSeconds;
           if (runtime.camp.type === 'blue' || runtime.camp.type === 'red') {
-            const buffs = sourceEntity === this.player ? this.playerBuffs : sourceEntity?.bot?.buffs;
+            const buffs = sourceEntity ? this.buffsFor(sourceEntity) : undefined;
             if (buffs) applyBuff(buffs, runtime.camp.type, this.world.simTime);
           }
         }
@@ -4722,7 +4722,7 @@ export default class BattleScene extends Phaser.Scene {
       shopAvailable: this.inBase(this.player.unit, 'ally') && this.pauseReasons.size === 0,
       ownedItems: [...this.ownedItems],
       buffs: [
-        ...this.playerBuffs.buffs.map((b) => ({
+        ...this.buffsFor(this.player).buffs.map((b) => ({
           kind: b.kind as string,
           remaining: Math.ceil(b.expiresAt - this.world.simTime),
         })),

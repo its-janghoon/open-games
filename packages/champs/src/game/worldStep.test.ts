@@ -470,6 +470,7 @@ describe('cloneWorldState', () => {
         resources: {},
         economy: {},
         progression: {},
+        buffs: {},
       });
     });
 
@@ -545,6 +546,7 @@ describe('cloneWorldState', () => {
 
       expect([...adopted].sort()).toEqual([
         'baron',
+        'buffs',
         'cooldowns',
         'dragonStacks',
         'economy',
@@ -564,7 +566,6 @@ describe('cloneWorldState', () => {
       ]);
       expect(remaining).toEqual([
         'autoAttackers',
-        'buffs',
         'campMembers',
         'camps',
         'effects',
