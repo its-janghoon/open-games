@@ -195,6 +195,7 @@ describe('cloneWorldState', () => {
     resources: { a: { current: 300, max: 300 } },
     buffs: { a: { buffs: [] } },
     baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+    dragonStacks: { ally: 0, enemy: 0 },
     objectives: [{ id: 'dragon', alive: false, nextSpawnAt: 300, permanentlyGone: false }],
     wardenCharges: { ally: null, enemy: null },
     traps: [
@@ -454,6 +455,8 @@ describe('cloneWorldState', () => {
         targets: {},
         passives: { counters: {}, deadlines: {} },
         wardenCharges: { ally: null, enemy: null },
+        baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+        dragonStacks: { ally: 0, enemy: 0 },
       });
     });
 
@@ -528,6 +531,8 @@ describe('cloneWorldState', () => {
         .sort();
 
       expect([...adopted].sort()).toEqual([
+        'baron',
+        'dragonStacks',
         'nextInsertionOrder',
         'passives',
         'simTime',
@@ -537,7 +542,6 @@ describe('cloneWorldState', () => {
       ]);
       expect(remaining).toEqual([
         'autoAttackers',
-        'baron',
         'buffs',
         'campMembers',
         'camps',
@@ -579,6 +583,7 @@ describe('advanceLives', () => {
     resources: {},
     buffs: {},
     baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+    dragonStacks: { ally: 0, enemy: 0 },
     objectives: [],
     wardenCharges: { ally: null, enemy: null },
     traps: [],
@@ -675,6 +680,7 @@ describe('advanceEffects', () => {
     resources: {},
     buffs: {},
     baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+    dragonStacks: { ally: 0, enemy: 0 },
     objectives: [],
     wardenCharges: { ally: null, enemy: null },
     traps: [],

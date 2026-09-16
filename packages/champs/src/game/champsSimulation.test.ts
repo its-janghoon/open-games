@@ -283,6 +283,7 @@ describe('champs world under rollback', () => {
         resources: {},
         buffs: {},
         baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+        dragonStacks: { ally: 0, enemy: 0 },
         objectives: [],
         wardenCharges: { ally: null, enemy: null },
         traps: [],
