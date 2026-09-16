@@ -4,6 +4,7 @@ export * from './json';
 export * from './matchmaking';
 export * from './protocol';
 export * from './roster';
+export * from './rosterHandshake';
 export * from './session';
 export * from './snapshot';
 export * from './transport';

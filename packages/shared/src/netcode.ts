@@ -44,7 +44,23 @@ export interface ChecksumMessage {
   hash: string;
 }
 
-export type NetMessage<Input> = InputMessage<Input> | ChecksumMessage;
+/**
+ * Anything two peers must agree on BEFORE the match runs, carried as an opaque string.
+ *
+ * The session neither reads nor produces these — it ignores them — because pre-match negotiation is the game's business,
+ * not the netcode's. What the netcode contributes is the channel: a game that needs to agree a roster, a map or a rule set
+ * should not have to open a second connection to do it, and gridfall had already grown its own `handshake` envelope
+ * outside this union for exactly that reason.
+ *
+ * Opaque on purpose. A typed payload would put every game's lobby vocabulary in shared, where a change to one game's
+ * negotiation would recompile the others.
+ */
+export interface LobbyMessage {
+  type: 'lobby';
+  payload: string;
+}
+
+export type NetMessage<Input> = InputMessage<Input> | ChecksumMessage | LobbyMessage;
 
 /**
  * The link. Send a message to the peer; be handed messages the peer sent.
@@ -234,6 +250,15 @@ export class NetSession<State, Input> {
       this.maybeChecksum();
       return;
     }
+    /**
+     * Dispatched explicitly rather than by falling through to "everything else is a checksum".
+     *
+     * That fall-through was safe while the union had two members and is a trap now it has three: a lobby message read as
+     * a checksum would cache `undefined` under tick `undefined` and could report a desync against a hash that was never
+     * sent. Ignoring an unknown message is the correct behaviour for a peer on a newer protocol, so this also stops a
+     * future member breaking an older build in the worst possible way.
+     */
+    if (message.type !== 'checksum') return;
     this.remoteHashes.set(message.tick, message.hash);
     this.compare(message.tick);
   }
