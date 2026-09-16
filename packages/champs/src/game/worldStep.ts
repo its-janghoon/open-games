@@ -404,9 +404,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     lives: Object.fromEntries(
       Object.entries(state.lives).map(([id, life]) => [id, { ...life }]),
     ),
-    economy: Object.fromEntries(
-      Object.entries(state.economy).map(([id, gold]) => [id, { ...gold }]),
-    ),
     structures: Object.fromEntries(
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
@@ -467,6 +464,7 @@ export type AdoptedWorld = Pick<
   | 'teamFacts'
   | 'cooldowns'
   | 'resources'
+  | 'economy'
 >;
 
 /** The adopted slice at match start. */
@@ -487,6 +485,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     teamFacts: createTeamFacts(),
     cooldowns: {},
     resources: {},
+    economy: {},
   };
 }
 
@@ -518,6 +517,9 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
       Object.entries(world.cooldowns).map(([id, cds]) => [id, { ...cds }]),
     ),
     resources: cloneResources(world.resources),
+    economy: Object.fromEntries(
+      Object.entries(world.economy).map(([id, gold]) => [id, { ...gold }]),
+    ),
   };
 }
 
