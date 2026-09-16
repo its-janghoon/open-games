@@ -11,6 +11,7 @@ import { cloneWaveSchedule, type WaveSchedule } from './rift/waveSchedule';
 import { cloneMinions, type MinionState } from './rift/minionBodies';
 import type { TargetTable } from './rift/minionCombat';
 import { clonePassiveState, createPassiveState, type PassiveState } from './rift/passives';
+import { noBaronBuff } from './rift/objectives';
 import { cloneAutoAttackers, type AutoAttacker } from './rift/autoAttack';
 import { cloneResources, type ResourceState } from './rift/resources';
 import { cloneTraps, type TrapState } from './rift/traps';
@@ -356,6 +357,19 @@ export interface WorldState {
   buffs: Record<string, BuffState>;
   /** Per-side tyrant buff. */
   baron: SideState<BaronBuffState>;
+  /**
+   * Dragon stacks per side.
+   *
+   * Added when the scene's adoption reached the objectives and found this had no home here at all — which is worth
+   * recording, because it means the field list was INCOMPLETE rather than merely unadopted. It is unambiguous authority:
+   * `dragonStackBonus` turns the count into attack damage, ability power, armour and health for the whole team, so two
+   * peers holding different counts field differently-statted champions. A rollback over a state without it would restore
+   * every position and hit point correctly and still drift, which is the hardest kind of divergence to attribute.
+   *
+   * The lesson generalises: "the Pick covers WorldState" is not the finish line for the adoption. "The scene holds no
+   * simulation authority outside the container" is.
+   */
+  dragonStacks: SideState<number>;
   /** Epic-monster spawn slots, without the Phaser entity the scene pairs with each one. */
   objectives: ObjectiveState[];
   /** A held warden charge per side, or null. */
@@ -412,7 +426,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     camps: cloneCampSpawns(state.camps),
     campMembers: cloneCampMembers(state.campMembers),
     buffs: cloneBuffs(state.buffs),
-    baron: cloneBaron(state.baron),
     objectives: cloneObjectives(state.objectives),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
@@ -449,7 +462,14 @@ export function cloneWorldState(state: WorldState): WorldState {
  */
 export type AdoptedWorld = Pick<
   WorldState,
-  'tick' | 'simTime' | 'nextInsertionOrder' | 'targets' | 'passives' | 'wardenCharges'
+  | 'tick'
+  | 'simTime'
+  | 'nextInsertionOrder'
+  | 'targets'
+  | 'passives'
+  | 'wardenCharges'
+  | 'baron'
+  | 'dragonStacks'
 >;
 
 /** The adopted slice at match start. */
@@ -461,6 +481,8 @@ export function createAdoptedWorld(): AdoptedWorld {
     targets: {},
     passives: createPassiveState(),
     wardenCharges: { ally: null, enemy: null },
+    baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+    dragonStacks: { ally: 0, enemy: 0 },
   };
 }
 
@@ -479,6 +501,8 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     targets: { ...world.targets },
     passives: clonePassiveState(world.passives),
     wardenCharges: cloneWardenCharges(world.wardenCharges),
+    baron: cloneBaron(world.baron),
+    dragonStacks: { ...world.dragonStacks },
   };
 }
 

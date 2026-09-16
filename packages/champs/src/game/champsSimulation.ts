@@ -204,6 +204,7 @@ export function createChampsSimulation(
       resources: Object.fromEntries(participants.map((id) => [id, initialResource(300)])),
       buffs: Object.fromEntries(participants.map((id) => [id, { buffs: [] }])),
       baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+      dragonStacks: { ally: 0, enemy: 0 },
       objectives: [],
       wardenCharges: { ally: null, enemy: null },
       traps: [],

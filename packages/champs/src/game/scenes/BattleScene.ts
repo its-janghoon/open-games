@@ -209,7 +209,6 @@ import {
   noBaronBuff,
   isHeraldWindowOpen,
   type TeamModifiers,
-  type BaronBuffState,
 } from '../rift/objectives';
 import type { EpicMonster } from '../rift/economy';
 import { attemptPurchase } from '../inventory';
@@ -692,10 +691,15 @@ export default class BattleScene extends Phaser.Scene {
 
   // Buffs / objectives (ally-team perspective drives HUD + player stats).
   private playerBuffs: BuffState = createBuffState();
-  private allyBaron: BaronBuffState = noBaronBuff();
-  private enemyBaron: BaronBuffState = noBaronBuff();
-  private allyDragonStacks = 0;
-  private enemyDragonStacks = 0;
+  /**
+   * The baron buff and the dragon stacks now live in `world.baron` / `world.dragonStacks`, one side table each rather
+   * than four scalar fields.
+   *
+   * `dragonStacks` did not exist in WorldState at all until this slice, which is the more important half of the finding:
+   * the field list was INCOMPLETE, not merely unadopted. `dragonStackBonus` turns the count into attack damage, ability
+   * power, armour and health for a whole team, so a rollback over a state without it restores every position and hit
+   * point correctly and still drifts — the hardest kind of divergence to attribute.
+   */
   private objectives: ObjectiveRuntime[] = [];
   /**
    * Both target-lock tables now live in `world.targets`, merged into the one `TargetTable` WorldState has always had.
@@ -864,10 +868,8 @@ export default class BattleScene extends Phaser.Scene {
       enemy: { championKills: 0, epicMonstersKilled: 0, objectivePoints: 0, totalGoldEarned: STARTING_GOLD * 5 },
     };
     this.playerBuffs = createBuffState();
-    this.allyBaron = noBaronBuff();
-    this.enemyBaron = noBaronBuff();
-    this.allyDragonStacks = 0;
-    this.enemyDragonStacks = 0;
+    this.world.baron.ally = noBaronBuff();
+    this.world.baron.enemy = noBaronBuff();
     this.objectives = this.rules.objectives.enabled
       ? [
           { id: 'dragon', entity: null, nextSpawnAt: this.rules.objectives.firstSpawnSeconds, permanentlyGone: false },
@@ -1770,8 +1772,8 @@ export default class BattleScene extends Phaser.Scene {
 
   /** The current team modifiers for a side (dragon stacks + baron buff). */
   private teamModifiers(side: MapSide): TeamModifiers {
-    const stacks = side === 'ally' ? this.allyDragonStacks : this.enemyDragonStacks;
-    const baron = side === 'ally' ? this.allyBaron : this.enemyBaron;
+    const stacks = side === 'ally' ? this.world.dragonStacks.ally : this.world.dragonStacks.enemy;
+    const baron = side === 'ally' ? this.world.baron.ally : this.world.baron.enemy;
     let mods = dragonStackBonus(stacks);
     if (baron.active) mods = addModifiers(mods, baron.modifiers);
     return mods;
@@ -2273,13 +2275,11 @@ export default class BattleScene extends Phaser.Scene {
     for (const champion of this.champions) {
       if (champion.bot) champion.bot.buffs = expired[champion.unit.id] ?? champion.bot.buffs;
     }
-    const allyWasActive = this.allyBaron.active;
-    const enemyWasActive = this.enemyBaron.active;
-    const baron = advanceBaron({ ally: this.allyBaron, enemy: this.enemyBaron }, this.world.simTime);
-    this.allyBaron = baron.ally;
-    this.enemyBaron = baron.enemy;
-    if (allyWasActive !== this.allyBaron.active) this.applyTeamChampionStats('ally');
-    if (enemyWasActive !== this.enemyBaron.active) this.applyTeamChampionStats('enemy');
+    const allyWasActive = this.world.baron.ally.active;
+    const enemyWasActive = this.world.baron.enemy.active;
+    this.world.baron = advanceBaron(this.world.baron, this.world.simTime);
+    if (allyWasActive !== this.world.baron.ally.active) this.applyTeamChampionStats('ally');
+    if (enemyWasActive !== this.world.baron.enemy.active) this.applyTeamChampionStats('enemy');
     for (const runtime of this.camps) {
       if (runtime.members.length === 0 && this.world.simTime >= runtime.nextSpawnAt) {
         runtime.members = this.spawnCamp(runtime.camp);
@@ -3792,12 +3792,12 @@ export default class BattleScene extends Phaser.Scene {
         else runtime.nextSpawnAt = this.world.simTime + this.rules.objectives.respawnSeconds;
       }
       if (objectiveId === 'dragon') {
-        if (sourceSide === 'ally') this.allyDragonStacks += 1;
-        else this.enemyDragonStacks += 1;
+        if (sourceSide === 'ally') this.world.dragonStacks.ally += 1;
+        else this.world.dragonStacks.enemy += 1;
         this.applyTeamChampionStats(sourceSide);
       } else if (objectiveId === 'baron') {
-        if (sourceSide === 'ally') this.allyBaron = applyBaronBuff(this.world.simTime);
-        else this.enemyBaron = applyBaronBuff(this.world.simTime);
+        if (sourceSide === 'ally') this.world.baron.ally = applyBaronBuff(this.world.simTime);
+        else this.world.baron.enemy = applyBaronBuff(this.world.simTime);
         this.applyTeamChampionStats(sourceSide);
       } else {
         const reward = heraldReward();
@@ -4623,8 +4623,8 @@ export default class BattleScene extends Phaser.Scene {
           kind: b.kind as string,
           remaining: Math.ceil(b.expiresAt - this.world.simTime),
         })),
-        ...(this.allyBaron.active
-          ? [{ kind: 'baron', remaining: Math.ceil(this.allyBaron.expiresAt - this.world.simTime) }]
+        ...(this.world.baron.ally.active
+          ? [{ kind: 'baron', remaining: Math.ceil(this.world.baron.ally.expiresAt - this.world.simTime) }]
           : []),
       ],
       camps: this.camps.map((runtime) => ({
@@ -4638,7 +4638,7 @@ export default class BattleScene extends Phaser.Scene {
       })),
       objectives: this.buildObjectives(),
       ...(this.armedAbility ? { aimingSlot: this.armedAbility } : {}),
-      dragonStacks: this.allyDragonStacks,
+      dragonStacks: this.world.dragonStacks.ally,
       objectivePoints: this.teamFacts.ally.objectivePoints,
       wardenChargeSeconds: Math.max(
         0,
