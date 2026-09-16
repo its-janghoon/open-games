@@ -1,6 +1,11 @@
 import type { Simulation } from '@open-games/shared';
 
-import { effectiveDamage, type Unit } from './combat';
+import {
+  areHostile,
+  distance,
+  effectiveDamage,
+  type Unit,
+} from './combat';
 import { createChampionLifeState } from './championLifeState';
 import { createEffectState } from './effects';
 import { initialGold } from './rift/economy';
@@ -17,6 +22,8 @@ import { resolveTraps } from './rift/traps';
 import { noBaronBuff } from './rift/objectives';
 import {
   advanceRecalls,
+  beginRecall,
+  cancelRecall,
   createTeamFacts,
   isDecided,
   ongoing,
@@ -75,17 +82,45 @@ export const TICK_SECONDS = 1 / 60;
  * or a class instance would compare as equal when it was not. `moveTo: null` means "no order
  * this tick", which is a real input rather than an absence - it is what the predictor repeats.
  */
+/**
+ * One champion's orders for one tick.
+ *
+ * Modelled on the scene's own `BattleCommand` union rather than invented, so the two cannot drift into describing
+ * different games. The UI-only members of that union are deliberately absent: `arm-cast`, `aim-start`, `aim-update` and
+ * `aim-cancel` only build up to a cast and change no world state, and `pause`, `resume` and `skip-learning` are match
+ * meta rather than orders. Those belong to the scene, and putting them here would imply the simulation had an opinion
+ * about a pointer.
+ *
+ * Compared by JSON.stringify in the rollback core, so every field must be plain data — no Map, Set or class.
+ */
 export interface ChampsInput {
+  /** Walk to a point. A null order does NOT cancel a previous one. */
   moveTo: { x: number; y: number } | null;
   /**
-   * Fire at the other champion this tick.
+   * Walk to a point, engaging anything hostile on the way — the scene's `attack-move-to`.
    *
-   * Present so the simulation actually exercises the impact queue. Without it the queue is
-   * always empty, and a rollback test over an empty queue silently proves nothing about the
-   * queue - measured: with no cast in the scenario, deliberately draining impacts before the
-   * clock moved did not fail a single assertion.
+   * A separate field rather than a flag on moveTo, because the two are different orders a player gives with different
+   * keys and a replay has to tell them apart.
    */
-  cast?: boolean;
+  attackMoveTo?: { x: number; y: number } | null;
+  /** Halt where you are: the scene's `stop`. Unlike a null moveTo this DOES clear the goal. */
+  stop?: boolean;
+  /**
+   * Swing at whatever is in range this tick.
+   *
+   * Named for what it is. It was `cast`, which claimed more than it did — abilities are not implemented here (see the
+   * note on `castSlot` in the step) and calling a basic attack a cast made the gap invisible.
+   */
+  basicAttack?: boolean;
+  /**
+   * Attack this specific unit, the scene's `target-at` resolved to an id.
+   *
+   * An id rather than a point, because resolving a point to a unit needs the scene's hit-testing; a peer that resolved
+   * it differently would attack a different target from the same input.
+   */
+  targetId?: string | null;
+  /** Begin recalling, or cancel a recall in progress. */
+  recall?: 'begin' | 'cancel' | null;
 }
 
 export const IDLE_INPUT: ChampsInput = { moveTo: null };
@@ -118,13 +153,30 @@ export function createChampsSimulation(
         id,
         kind: 'champion',
         team: index === 0 ? 'ally' : 'enemy',
-        pos: { x: 100 + index * 200, y: 300 },
+        /**
+         * 120 apart, inside the 150 attackRange below.
+         *
+         * They used to start 200 apart, which was fine while a "cast" hit `units.find(u => u.id !== id)` regardless of
+         * distance. Now that a basic attack requires a hostile IN RANGE, that spacing meant nothing ever fired — and an
+         * impact queue that is always empty is exactly the condition this file already warns about, where draining
+         * impacts before the clock moved failed no assertion at all.
+         */
+        pos: { x: 100 + index * 120, y: 300 },
         hp: 600,
         maxHp: 600,
         ad: 60,
         armor: 30,
         attackRange: 150,
-        attackSpeed: 0.8,
+        /**
+         * 12 attacks per second — a harness value, not a champion's.
+         *
+         * A real 0.8 makes one attack interval 75 ticks, and the rollback window here is 120, so a test that withholds an
+         * input at tick 5 and compares at tick 20 could not observe a second shot at all: both the reference and the
+         * session fired exactly once and "fires every tick" was indistinguishable from "fires once". Widening the window
+         * instead pushes tick 5 outside the rollback window and the input is refused as too old. So the fire rate is the
+         * thing to change, and it is stated as artificial rather than dressed up as balance.
+         */
+        attackSpeed: 12,
         moveSpeed: 340,
         attackCdRemaining: 0,
         dead: false,
@@ -196,44 +248,97 @@ export function createChampsSimulation(
       if (isDecided(next.outcome)) return next;
 
       for (const [id, input] of inputs) {
-        if (input.moveTo) next.moveGoals[id] = { ...input.moveTo };
-        // A null order does NOT clear the goal: a champion ordered to a point keeps walking
-        // there while its player holds still, which is what makes repeat-last-input a
-        // reasonable prediction rather than a stutter.
-        if (input.cast) {
-          const shooter = next.units.find((u) => u.id === id);
-          const target = next.units.find((u) => u.id !== id);
-          if (shooter && target && !shooter.dead) {
-            const resolved = basicAttackBonus(
-              {
-                championId: null,
-                attackerId: shooter.id,
-                targetId: target.id,
-                now: next.simTime,
-                items: [],
-                hasRedBuff: false,
-              },
-              next.passives,
-            );
-            const passiveBonus = resolved.bonusAd;
-            next.passives = resolved.state;
-            queueImpact(next, {
-              dueAt: next.simTime + SHOT_FLIGHT_SECONDS,
-              source: { ...shooter, pos: { ...shooter.pos } },
-              targetId: target.id,
-              radius: 0,
-              // Passives are resolved HERE rather than at impact, because the queue copies the shooter as it was at
-              // cast time — a bonus computed on landing would be a different champion's bonus.
-              rawDamage: shooter.ad + passiveBonus,
-              color: 0xffffff,
-              stunDuration: 0,
-              ability: false,
-              ultimate: false,
-              singleTarget: true,
-              chronoProc: false,
-            });
-          }
+        const actor = next.units.find((u) => u.id === id);
+        if (!actor || actor.dead) continue;
+
+        // `stop` is checked FIRST and clears the goal, which a null moveTo deliberately does not: a champion ordered to a
+        // point keeps walking there while its player holds still, and that is what makes repeat-last-input a reasonable
+        // prediction instead of a stutter. Only an explicit halt is a halt.
+        if (input.stop) {
+          delete next.moveGoals[id];
+          next.targets[id] = null;
         }
+        if (input.moveTo) next.moveGoals[id] = { ...input.moveTo };
+        if (input.attackMoveTo) {
+          next.moveGoals[id] = { ...input.attackMoveTo };
+          // An attack-move keeps no lock of its own: whatever comes into range is engaged, and clearing the lock here is
+          // what lets that happen rather than the champion holding a target it was given earlier.
+          next.targets[id] = null;
+        }
+        if (input.targetId !== undefined) next.targets[id] = input.targetId;
+
+        if (input.recall === 'begin') next.recalls = beginRecall(next.recalls, id, next.simTime);
+        else if (input.recall === 'cancel') next.recalls = cancelRecall(next.recalls, id);
+        // Any order other than a plain move cancels a recall, matching the scene, where casting or attacking breaks it.
+        if (input.basicAttack || input.attackMoveTo || input.stop) {
+          next.recalls = cancelRecall(next.recalls, id);
+        }
+
+        if (!input.basicAttack) continue;
+
+        /**
+         * Pick a target: the explicit lock if it is still valid, otherwise the NEAREST hostile in range.
+         *
+         * This replaces `units.find((u) => u.id !== id)` — literally "the other unit" — which only behaves like a game
+         * when exactly two champions exist. With a full team it attacked whoever happened to sit at index 0 or 1,
+         * regardless of range, team or distance.
+         */
+        const locked = next.targets[id]
+          ? next.units.find((u) => u.id === next.targets[id] && !u.dead)
+          : undefined;
+        const inRange = (u: typeof actor) =>
+          distance(actor.pos, u.pos) <= actor.attackRange;
+        const chosen =
+          locked && areHostile(locked.team, actor.team) && inRange(locked)
+            ? locked
+            : next.units
+                .filter((u) => !u.dead && u.id !== id && areHostile(u.team, actor.team) && inRange(u))
+                .sort(
+                  (a, b) =>
+                    distance(actor.pos, a.pos) - distance(actor.pos, b.pos) ||
+                    a.id.localeCompare(b.id),
+                )[0];
+        if (!chosen) continue;
+        if (actor.attackCdRemaining > 0) continue;
+
+        const resolved = basicAttackBonus(
+          {
+            championId: null,
+            attackerId: actor.id,
+            targetId: chosen.id,
+            now: next.simTime,
+            items: [],
+            hasRedBuff: next.buffs[id]?.buffs.some((b) => b.kind === 'red') ?? false,
+            /**
+             * championId and items stay null and empty, and that is a KNOWN gap rather than an oversight. Both live on
+             * the scene's per-champion state, and champion-specific passives plus item effects are resolved inside
+             * BattleScene.castAbility — 155 lines calling 15 scene methods. Reimplementing that here would duplicate the
+             * most balance-sensitive code in the game, which is the duplication this whole refactor has been undoing.
+             * Red buff IS read, because buffs are now snapshot state and reading them costs nothing.
+             */
+          },
+          next.passives,
+        );
+        next.passives = resolved.state;
+
+        queueImpact(next, {
+          dueAt: next.simTime + SHOT_FLIGHT_SECONDS,
+          source: { ...actor, pos: { ...actor.pos } },
+          targetId: chosen.id,
+          radius: 0,
+          // Resolved HERE rather than at impact, because the queue copies the shooter as it was at cast time — a bonus
+          // computed on landing would be a different champion's bonus.
+          rawDamage: actor.ad + resolved.bonusAd,
+          color: 0xffffff,
+          stunDuration: 0,
+          ability: false,
+          ultimate: false,
+          singleTarget: true,
+          chronoProc: false,
+        });
+        // Respect the attacker's own attack speed, exactly as combat.ts's resetAttackCooldown does, so a champion cannot
+        // fire once per tick.
+        actor.attackCdRemaining = actor.attackSpeed > 0 ? 1 / actor.attackSpeed : Infinity;
       }
 
       advanceEffects(next, TICK_SECONDS);
