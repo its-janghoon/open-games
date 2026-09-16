@@ -65,14 +65,14 @@ describe('buffs', () => {
   });
 
   it('applies and expires a buff on the state', () => {
-    const state = createBuffState();
+    let state = createBuffState();
     applyBuff(state, 'blue', 0);
     expect(hasBuff(state, 'blue', 0)).toBe(true);
     expect(hasBuff(state, 'red', 0)).toBe(false);
 
     // Still active just before expiry, gone after.
     expect(hasBuff(state, 'blue', BUFF_DURATION_SECONDS - 1)).toBe(true);
-    expireBuffs(state, BUFF_DURATION_SECONDS);
+    state = expireBuffs(state, BUFF_DURATION_SECONDS);
     expect(hasBuff(state, 'blue', BUFF_DURATION_SECONDS)).toBe(false);
     expect(state.buffs.length).toBe(0);
   });

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
+import { noBaronBuff } from './rift/objectives';
+
 import type { PendingImpact, Unit } from './combat';
 import { createChampionLifeState } from './championLifeState';
 import { createEffectState } from './effects';
@@ -56,6 +58,10 @@ const world = (simTime = 0): WorldState => ({
   teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
   outcome: { kind: 'ongoing' },
   resources: {},
+  buffs: {},
+  baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+  objectives: [],
+  wardenCharges: { ally: null, enemy: null },
   traps: [],
   camps: [],
   campMembers: [],

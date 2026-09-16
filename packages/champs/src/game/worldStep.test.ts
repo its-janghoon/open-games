@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
+import { noBaronBuff } from './rift/objectives';
+
 import {
   advanceEffects,
   advanceLives,
@@ -189,6 +191,10 @@ describe('cloneWorldState', () => {
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
     resources: { a: { current: 300, max: 300 } },
+    buffs: { a: { buffs: [] } },
+    baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+    objectives: [{ id: 'dragon', alive: false, nextSpawnAt: 300, permanentlyGone: false }],
+    wardenCharges: { ally: null, enemy: null },
     traps: [
       {
         id: 'trap:a:1.000',
@@ -297,6 +303,11 @@ describe('cloneWorldState', () => {
     // passives: the FIFTH field to slip through this way. The pattern is now established well enough that a new
     // record field should be asserted here in the same commit that adds it, rather than after an injection finds it.
     // autoAttackers asserted in the SAME commit that adds it, which is now the standing rule for a new record field.
+    copy.buffs.a.buffs.push({ kind: 'blue' as const, expiresAt: 999 });
+    copy.baron.ally.active = true;
+    copy.baron.ally.modifiers.attackDamage = 999;
+    copy.objectives[0].permanentlyGone = true;
+    copy.wardenCharges.enemy = { acquiredAt: 5, expiresAt: 9 };
     copy.traps[0].radius = -1;
     copy.traps[0].point.x = -1;
     copy.traps.push({ ...copy.traps[0], id: 'extra' });
@@ -337,6 +348,11 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.buffs.a.buffs).toHaveLength(0);
+    expect(original.baron.ally.active).toBe(false);
+    expect(original.baron.ally.modifiers.attackDamage).toBe(0);
+    expect(original.objectives[0].permanentlyGone).toBe(false);
+    expect(original.wardenCharges.enemy).toBeNull();
     expect(original.traps).toHaveLength(1);
     expect(original.traps[0].radius).toBe(120);
     expect(original.traps[0].point.x).toBe(500);
@@ -443,6 +459,10 @@ describe('advanceLives', () => {
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
     resources: {},
+    buffs: {},
+    baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+    objectives: [],
+    wardenCharges: { ally: null, enemy: null },
     traps: [],
     camps: [],
     campMembers: [],
@@ -535,6 +555,10 @@ describe('advanceEffects', () => {
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
     resources: {},
+    buffs: {},
+    baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+    objectives: [],
+    wardenCharges: { ally: null, enemy: null },
     traps: [],
     camps: [],
     campMembers: [],

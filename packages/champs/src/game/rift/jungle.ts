@@ -223,9 +223,19 @@ export function applyBuff(state: BuffState, kind: BuffKind, nowSeconds: number):
  * Remove any buffs that have expired by `nowSeconds`. Mutates and returns the
  * state.
  */
+/**
+ * Drop every buff that has lapsed, as a NEW state.
+ *
+ * This used to assign back into `state.buffs` and return the same object, and no caller used the return value — all three
+ * relied on the mutation. That is the hazard fixed in efea604 for effect queries: a function that looks like a read
+ * rewrites the world, so the world depends on how many times it was called rather than only on its inputs. A replay that
+ * expires once where the original expired twice then diverges, and nothing about the call sites hints at it.
+ *
+ * Now that buffs are snapshot state, a mutating expire would also reach backwards through a shared reference into a
+ * restored snapshot. Returning a new state makes that impossible rather than merely unlikely.
+ */
 export function expireBuffs(state: BuffState, nowSeconds: number): BuffState {
-  state.buffs = state.buffs.filter((b) => b.expiresAt > nowSeconds);
-  return state;
+  return { buffs: state.buffs.filter((b) => b.expiresAt > nowSeconds) };
 }
 
 /** Whether a buff of `kind` is currently active at `nowSeconds`. */

@@ -21,6 +21,17 @@ import {
   type CampSpawnState,
 } from './rift/campCombat';
 import {
+  cloneBaron,
+  cloneBuffs,
+  cloneObjectives,
+  cloneWardenCharges,
+  type ObjectiveState,
+  type SideState,
+} from './rift/fieldState';
+import type { BuffState } from './rift/jungle';
+import type { BaronBuffState } from './rift/objectives';
+import type { WardenCharge } from './wardenPolicy';
+import {
   cloneTeamFacts,
   type MatchOutcome,
   type RecallTable,
@@ -341,6 +352,14 @@ export interface WorldState {
   /** Jungle camps and their living members. The members were Phaser Entities, so a snapshot could not hold them at all. */
   camps: CampSpawnState[];
   campMembers: CampMemberState[];
+  /** Per-participant jungle buffs. Blue's resource regen is read from here, which is why it had to join the snapshot. */
+  buffs: Record<string, BuffState>;
+  /** Per-side tyrant buff. */
+  baron: SideState<BaronBuffState>;
+  /** Epic-monster spawn slots, without the Phaser entity the scene pairs with each one. */
+  objectives: ObjectiveState[];
+  /** A held warden charge per side, or null. */
+  wardenCharges: SideState<WardenCharge | null>;
 }
 
 /**
@@ -397,6 +416,10 @@ export function cloneWorldState(state: WorldState): WorldState {
     traps: cloneTraps(state.traps),
     camps: cloneCampSpawns(state.camps),
     campMembers: cloneCampMembers(state.campMembers),
+    buffs: cloneBuffs(state.buffs),
+    baron: cloneBaron(state.baron),
+    objectives: cloneObjectives(state.objectives),
+    wardenCharges: cloneWardenCharges(state.wardenCharges),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

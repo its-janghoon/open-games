@@ -2155,9 +2155,10 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private tickBuffsAndObjectives() {
-    expireBuffs(this.playerBuffs, this.elapsed);
+    // expireBuffs is now non-mutating, so the result MUST be assigned back or buffs never lapse.
+    this.playerBuffs = expireBuffs(this.playerBuffs, this.elapsed);
     for (const champion of this.champions) {
-      if (champion.bot) expireBuffs(champion.bot.buffs, this.elapsed);
+      if (champion.bot) champion.bot.buffs = expireBuffs(champion.bot.buffs, this.elapsed);
     }
     const allyWasActive = this.allyBaron.active;
     const enemyWasActive = this.enemyBaron.active;

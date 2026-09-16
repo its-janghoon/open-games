@@ -11,6 +11,7 @@ import { pruneTargets, resolveMinionCombat } from './rift/minionCombat';
 import { basicAttackBonus, createPassiveState, prunePassives } from './rift/passives';
 import { resolveAutoAttacks } from './rift/autoAttack';
 import { advanceResources, initialResource } from './rift/resources';
+import { noBaronBuff } from './rift/objectives';
 import {
   advanceRecalls,
   createTeamFacts,
@@ -141,6 +142,10 @@ export function createChampsSimulation(
       outcome: ongoing(),
       // One turret per side, so the step is genuinely exercised without needing the scene's full structure graph.
       resources: Object.fromEntries(participants.map((id) => [id, initialResource(300)])),
+      buffs: Object.fromEntries(participants.map((id) => [id, { buffs: [] }])),
+      baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+      objectives: [],
+      wardenCharges: { ally: null, enemy: null },
       traps: [],
       camps: [],
       campMembers: [],

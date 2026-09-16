@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
+import { noBaronBuff } from './rift/objectives';
+
 import { createEffectState } from './effects';
 import { advanceEffects, advanceLives, type WorldState } from './worldStep';
 import type { Unit } from './combat';
@@ -60,6 +62,10 @@ describe('advanceLives against a real match', () => {
       teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
       outcome: { kind: 'ongoing' },
       resources: {},
+      buffs: {},
+      baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+      objectives: [],
+      wardenCharges: { ally: null, enemy: null },
       traps: [],
       camps: [],
       campMembers: [],
@@ -106,6 +112,10 @@ describe('advanceLives against a real match', () => {
       teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
       outcome: { kind: 'ongoing' },
       resources: {},
+      buffs: {},
+      baron: { ally: noBaronBuff(), enemy: noBaronBuff() },
+      objectives: [],
+      wardenCharges: { ally: null, enemy: null },
       traps: [],
       camps: [],
       campMembers: [],
