@@ -38,7 +38,6 @@ import { loadProfile, saveProfile } from '../../profile';
 import {
   lowestHpRatioHostile,
   resolveDashEndpoint,
-  targetsIntersectingLine,
 } from '../abilitySemantics';
 import { shouldDeployHeldWarden, type WardenCharge } from '../wardenPolicy';
 import {
@@ -168,9 +167,6 @@ import {
   addGold,
   addXp,
   advanceGold,
-  minionBounty,
-  structureBounty,
-  CHAMPION_TAKEDOWN_BOUNTY,
   STARTING_GOLD,
   type ProgressState,
 } from '../rift/economy';
@@ -179,6 +175,12 @@ import { resolveAutoAttacks, type AutoAttacker } from '../rift/autoAttack';
 import { planCast, type CastActor } from '../rift/abilityEffects';
 import { advanceBaron, advanceBuffs, advanceWardenCharges } from '../rift/fieldState';
 import { resolveTraps, trapIdFor } from '../rift/traps';
+import {
+  CHRONO_PROC_SECONDS,
+  resolveImpactHits,
+  shouldProcChrono,
+} from '../rift/impactTargeting';
+import { classifyVictim, resolveKill } from '../rift/killRewards';
 import type { TargetTable } from '../rift/minionCombat';
 import {
   computeEffectiveStats,
@@ -716,7 +718,14 @@ export default class BattleScene extends Phaser.Scene {
   // Wave scheduling.
   private spawnedWaves = 0;
   /** Inhibitors down per side, for super-minion spawning. */
-  private inhibitorKillTimes = new Map<string, number>();
+  /**
+   * When each inhibitor was destroyed, as a RECORD rather than a Map.
+   *
+   * 75431b9 moved the pure side to a Record because a Map cannot be snapshotted — JSON flattens it to {} and the rollback
+   * core compares by JSON.stringify — but the scene kept its Map and converted at the call boundary with
+   * Object.fromEntries. That left the hazard in place in the one place that matters, since this field is the authority.
+   */
+  private inhibitorKillTimes: Record<string, number> = {};
 
   private moveTarget: Vec2 | null = null;
   private playerOrder: 'move' | 'attack-move' | 'target' | 'stop' = 'stop';
@@ -859,7 +868,7 @@ export default class BattleScene extends Phaser.Scene {
     this.authorityInsertionOrder = 0;
     this.impactInsertionOrder = 0;
     this.spawnedWaves = 0;
-    this.inhibitorKillTimes.clear();
+    this.inhibitorKillTimes = {};
     this.moveTarget = null;
     this.playerOrder = 'stop';
     this.attackMoveArmed = false;
@@ -2293,7 +2302,7 @@ export default class BattleScene extends Phaser.Scene {
       },
       this.elapsed,
       this.lanes,
-      { killedAt: Object.fromEntries(this.inhibitorKillTimes) },
+      { killedAt: this.inhibitorKillTimes },
       (now, killedAt) => isInhibitorAlive(now, killedAt, this.mode),
       this.mode,
     );
@@ -3225,7 +3234,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private reviveInhibitors() {
-    for (const [id, killedAt] of [...this.inhibitorKillTimes]) {
+    for (const [id, killedAt] of Object.entries(this.inhibitorKillTimes)) {
       if (!isInhibitorAlive(this.elapsed, killedAt, this.mode)) continue;
       const inhibitor = this.structureById.get(id);
       if (inhibitor) {
@@ -3234,7 +3243,7 @@ export default class BattleScene extends Phaser.Scene {
         inhibitor.container.setVisible(true).setAlpha(1);
         inhibitor.shadow?.setVisible(true).setAlpha(0.32);
       }
-      this.inhibitorKillTimes.delete(id);
+      delete this.inhibitorKillTimes[id];
     }
   }
 
@@ -3479,80 +3488,53 @@ export default class BattleScene extends Phaser.Scene {
     this.pendingImpacts = partitioned.pending;
     for (const impact of partitioned.due.sort((a, b) => a.dueAt - b.dueAt || a.insertionOrder - b.insertionOrder)) {
       const source = impact.source;
-      if (impact.targetId) {
-        const target = this.entityById.get(impact.targetId);
-        if (target && this.canDamageTarget(source, target)) {
-          this.applyTargetedDamage(source, target, impact.rawDamage, impact.color, {
+
+      /**
+       * WHO is struck comes from the pure step; applying the damage stays here.
+       *
+       * The three impact shapes used to be three branches in this method, each with its own copy of the
+       * apply-damage call and two of them with their own copy of the chrono-proc rule. The shapes are still distinct in
+       * the step — a line carries a per-body falloff that neither of the others has — but the application is now written
+       * once.
+       */
+      const hits = resolveImpactHits(
+        {
+          targetId: impact.targetId,
+          point: impact.point,
+          line: impact.line,
+          radius: impact.radius,
+          singleTarget: impact.singleTarget,
+        },
+        this.allEntities.map((entity) => ({ id: entity.unit.id, pos: entity.unit.pos })),
+        (candidate) => {
+          const entity = this.entityById.get(candidate.id);
+          return Boolean(entity && this.canDamageTarget(source, entity));
+        },
+      );
+
+      for (const hit of hits) {
+        const target = this.entityById.get(hit.targetId);
+        if (!target) continue;
+        this.applyTargetedDamage(
+          source,
+          target,
+          impact.rawDamage * hit.damageMultiplier,
+          impact.color,
+          {
             ability: impact.ability,
             ultimate: impact.ultimate,
             stunDuration: impact.stunDuration,
             slowPercent: impact.slowPercent,
             slowDuration: impact.slowDuration,
             pullDuration: impact.pullDuration,
-          });
-        }
-        continue;
-      }
-      if (impact.line) {
-        const line = impact.line;
-        const struck = targetsIntersectingLine(
-          line.origin,
-          line.endpoint,
-          line.halfWidth,
-          this.allEntities
-            .filter((target) => this.canDamageTarget(source, target))
-            .map((entity) => ({ id: entity.unit.id, pos: entity.unit.pos, entity })),
+          },
         );
-        struck.forEach(({ entity }, index) => {
-          this.applyTargetedDamage(
-            source,
-            entity,
-            impact.rawDamage * (index === 0 ? 1 : line.subsequentDamageMultiplier),
-            impact.color,
-            {
-              ability: impact.ability,
-              ultimate: impact.ultimate,
-              stunDuration: impact.stunDuration,
-              slowPercent: impact.slowPercent,
-              slowDuration: impact.slowDuration,
-              pullDuration: impact.pullDuration,
-            },
-          );
-        });
-        if (impact.chronoProc && struck.length > 0) {
-          const caster = this.entityById.get(source.id);
-          const cds = caster === this.player ? this.playerCds : caster?.bot?.cds;
-          if (cds) tickCooldowns(cds, 0.5);
-        }
-        continue;
       }
-      if (!impact.point) continue;
-      const targets = this.allEntities
-        .filter(
-          (target) =>
-            this.canDamageTarget(source, target) &&
-            distance(target.unit.pos, impact.point!) <= impact.radius,
-        )
-        .sort(
-          (a, b) =>
-            distance(a.unit.pos, impact.point!) - distance(b.unit.pos, impact.point!) ||
-            a.unit.id.localeCompare(b.unit.id),
-        );
-      const struck = impact.singleTarget ? targets.slice(0, 1) : targets;
-      for (const target of struck) {
-        this.applyTargetedDamage(source, target, impact.rawDamage, impact.color, {
-          ability: impact.ability,
-          ultimate: impact.ultimate,
-          stunDuration: impact.stunDuration,
-          slowPercent: impact.slowPercent,
-          slowDuration: impact.slowDuration,
-          pullDuration: impact.pullDuration,
-        });
-      }
-      if (impact.chronoProc && struck.length > 0) {
+
+      if (shouldProcChrono(impact.chronoProc, hits)) {
         const caster = this.entityById.get(source.id);
         const cds = caster === this.player ? this.playerCds : caster?.bot?.cds;
-        if (cds) tickCooldowns(cds, 0.5);
+        if (cds) tickCooldowns(cds, CHRONO_PROC_SECONDS);
       }
     }
   }
@@ -3693,24 +3675,34 @@ export default class BattleScene extends Phaser.Scene {
         };
       }
       if (targetEntity === this.player) this.playerDeaths += 1;
-      if (sourceSide) {
-        this.teamFacts[sourceSide].championKills += 1;
-        this.awardBounty(sourceEntity, CHAMPION_TAKEDOWN_BOUNTY);
-      }
+      // Payout through the pure step, so the tally and the bounty cannot disagree about whether this kill counted.
+      const outcome = resolveKill({ victimKind: 'champion', killerSide: sourceSide });
+      this.teamFacts[sourceSide ?? 'ally'].championKills += outcome.championKillDelta;
+      this.awardBounty(sourceEntity, outcome.bounty);
       if (source.id === 'player') this.stats.championKills += 1;
     } else if (target.kind === 'minion') {
       const type = (targetEntity?.minionType ?? 'melee') as MinionType;
-      this.awardBounty(sourceEntity, minionBounty(type));
+      this.awardBounty(
+        sourceEntity,
+        resolveKill({ victimKind: 'minion', minionType: type, killerSide: sourceSide }).bounty,
+      );
       if (source.id === 'player') this.stats.minionKills += 1;
     } else if (target.kind === 'turret' || target.kind === 'nexus') {
       const node = targetEntity?.node;
-      const bountyKind = node?.kind === 'inhibitor'
-        ? 'inhibitor'
-        : node?.kind === 'nexus'
-          ? 'nexus'
-          : 'turret';
-      this.awardBounty(sourceEntity, structureBounty(bountyKind));
-      if (node?.kind === 'inhibitor') this.inhibitorKillTimes.set(target.id, this.elapsed);
+      /**
+       * Classification and payout come from the SAME place on purpose.
+       *
+       * `unit.kind` says 'turret' for an inhibitor and only the map node tells them apart, so a classification written
+       * separately from the payout is how an inhibitor comes to pay a turret's bounty. The respawn timer is independent of
+       * attribution, because it is the inhibitor's own consequence rather than a reward — an inhibitor felled by a minion
+       * wave still respawns.
+       */
+      const outcome = resolveKill({
+        victimKind: classifyVictim(target.kind, node?.kind),
+        killerSide: sourceSide,
+      });
+      this.awardBounty(sourceEntity, outcome.bounty);
+      if (outcome.startsInhibitorRespawn) this.inhibitorKillTimes[target.id] = this.elapsed;
       if (source.id === 'player' && node?.kind.endsWith('Turret')) this.recordLearning('destroy-turret');
     } else if (target.kind === 'monster' && targetEntity?.campId) {
       const runtime = this.camps.find((candidate) => candidate.camp.id === targetEntity.campId);
@@ -4502,7 +4494,7 @@ export default class BattleScene extends Phaser.Scene {
       } else if (kind === 'inhibitor') {
         inhibitorsMax += 1;
         // Inhibitors "respawn" per the pure rule; treat as alive if respawned.
-        const killedAt = this.inhibitorKillTimes.get(s.node.id) ?? null;
+        const killedAt = this.inhibitorKillTimes[s.node.id] ?? null;
         if (isInhibitorAlive(this.elapsed, killedAt) && !s.unit.dead) inhibitors += 1;
       }
     }
