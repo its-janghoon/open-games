@@ -186,7 +186,6 @@ import {
   shouldProcChrono,
 } from '../rift/impactTargeting';
 import { classifyVictim, resolveKill } from '../rift/killRewards';
-import type { TargetTable } from '../rift/minionCombat';
 import {
   computeEffectiveStats,
   recommendBuild,
@@ -636,7 +635,6 @@ export default class BattleScene extends Phaser.Scene {
   /** Constant-time authoritative entity lookup for targeting and impacts. */
   private entityById = new Map<string, Entity>();
   /** Last acquired target per acting entity; retained until it becomes invalid. */
-  private targetByEntityId = new Map<string, string>();
   /**
    * Passive state, now one plain object rather than three Maps.
    *
@@ -700,12 +698,20 @@ export default class BattleScene extends Phaser.Scene {
   private enemyDragonStacks = 0;
   private objectives: ObjectiveRuntime[] = [];
   /**
-   * Which enemy each auto-attacker has locked on to, persisted between ticks.
+   * Both target-lock tables now live in `world.targets`, merged into the one `TargetTable` WorldState has always had.
    *
-   * Scene-side for now. It belongs in the snapshot — a rollback that restored positions but not who had locked on would
-   * re-pick targets on replay — and moving it there is the rollback wiring's job, not this change's.
+   * The scene kept two: a `Map` for the per-unit persistent lock and a `Record` for auto-attackers. Merging them is safe
+   * because a minion and a turret can never share an id, and it is REQUIRED rather than tidy — adopting only one half
+   * would put a table in the snapshot that omits the other half's locks, and a rollback that restored positions but not
+   * who had locked on re-picks targets on replay. Better to have no entry than half of them.
+   *
+   * `resolveAutoAttacks` copies the whole table and rewrites only its own attackers' entries, so passing the merged
+   * table through it preserves the minion locks.
+   *
+   * Absent key and explicit `null` are read identically here (`?? null`), matching `pruneTargets`. The scene DELETES a
+   * lapsed lock rather than writing `null`, which is what stops the table growing one null per dead minion; the pure side
+   * writes `null` and prunes instead. Both are correct, and mixing them is why this note exists.
    */
-  private autoAttackTargets: TargetTable = {};
 
   private camps: CampRuntime[] = [];
   private traps: TrapRuntime[] = [];
@@ -715,14 +721,14 @@ export default class BattleScene extends Phaser.Scene {
   private authorityInsertionOrder = 0;
 
   /**
-   * The impact queue's monotonic counter, separate from the wave scheduler's above.
+   * The impact queue's monotonic counter now lives in `world.nextInsertionOrder`, separate from the wave scheduler's
+   * `authorityInsertionOrder` above.
    *
    * They were one field. The wave scheduler derives MINION IDENTITY from its order, so every queued impact and every armed
    * trap shifted the id the next minion would get — a replay in which a cast lands differently renumbers every later
    * minion. The pure layer has always kept these separate (WorldState.nextInsertionOrder for impacts, waves.nextOrder for
-   * the schedule); the scene did not.
+   * the schedule); the scene did not, and now it does with the counter in the snapshot where a rewind can restore it.
    */
-  private impactInsertionOrder = 0;
 
   // Wave scheduling.
   private spawnedWaves = 0;
@@ -761,8 +767,13 @@ export default class BattleScene extends Phaser.Scene {
   private damageTexts = new Set<Phaser.GameObjects.Text>();
   private minionSequence = 0;
 
-  private elapsed = 0;
-  private simulationTick = 0;
+  /**
+   * The frame-time remainder, and NOT part of the world.
+   *
+   * Deliberately left out of `world`: it is render-loop bookkeeping that says how much real time has arrived since the
+   * last fixed step, so restoring it with a snapshot would make a rewind depend on frame pacing. The clock the world
+   * runs on is `world.tick` / `world.simTime`.
+   */
   private simulationAccumulator = 0;
   private scheduledCommands: ScheduledBattleCommand[] = [];
   private nextHudAt = 0;
@@ -834,7 +845,6 @@ export default class BattleScene extends Phaser.Scene {
     this.minions = [];
     this.allEntities = [];
     this.entityById.clear();
-    this.targetByEntityId.clear();
     // Two Maps remain, and they hold the passives NOT extracted: nightveil's smoke, aegis, ironhold, reflect and an
     // ability-side stack counter. Only the basic-attack subset moved into PassiveState, so both are reset here.
     this.passiveCounters.clear();
@@ -874,7 +884,6 @@ export default class BattleScene extends Phaser.Scene {
     this.pendingImpacts = [];
     this.pendingWaveSpawns = [];
     this.authorityInsertionOrder = 0;
-    this.impactInsertionOrder = 0;
     this.spawnedWaves = 0;
     this.inhibitorKillTimes = {};
     this.moveTarget = null;
@@ -889,8 +898,6 @@ export default class BattleScene extends Phaser.Scene {
     this.learning = createLearningState();
     this.purchaseFeedbackSequence = 0;
     this.lastPurchaseFeedback = undefined;
-    this.elapsed = 0;
-    this.simulationTick = 0;
     this.simulationAccumulator = 0;
     this.scheduledCommands = [];
     this.nextHudAt = 0;
@@ -938,7 +945,7 @@ export default class BattleScene extends Phaser.Scene {
     // plane to world units, and the whole point of that change is a property no screenshot can show: the same match must
     // compute the same distances at any window size.
     (window as unknown as { __CHAMPS__?: unknown }).__CHAMPS__ = {
-      tick: () => this.elapsed,
+      tick: () => this.world.simTime,
       space: () => ({
         worldSize: WORLD_SIZE,
         playerPos: this.player ? { ...this.player.unit.pos } : null,
@@ -958,7 +965,7 @@ export default class BattleScene extends Phaser.Scene {
       camps: () => this.camps.map((c) => ({ id: c.camp.id, alive: c.members.filter((m) => !m.unit.dead).length, nextSpawnAt: c.nextSpawnAt })),
       // Who each auto-attacker has locked on to, so a probe can prove turrets are still deciding after the shared-rule
       // adoption — a passing unit suite cannot, since it does not drive this scene.
-      locks: () => ({ ...this.autoAttackTargets }),
+      locks: () => ({ ...this.world.targets }),
       /**
        * Submit a battle command straight into the scene's own funnel.
        *
@@ -985,6 +992,27 @@ export default class BattleScene extends Phaser.Scene {
         attackCdRemaining: Number(e.unit.attackCdRemaining.toFixed(3)),
         dead: e.unit.dead,
       })),
+      /**
+       * Held warden charges and the epic-monster slots, for the one path a probe cannot otherwise see.
+       *
+       * The spend rule is unit-tested, but a unit test cannot show the SCENE acquiring a charge from a herald kill and
+       * then spending it on a structure — that needs a real match past the herald window with a real kill attributed to a
+       * real side. Read-only, like every other entry here.
+       */
+      warden: () => ({
+        charges: {
+          ally: this.world.wardenCharges.ally ? { ...this.world.wardenCharges.ally } : null,
+          enemy: this.world.wardenCharges.enemy ? { ...this.world.wardenCharges.enemy } : null,
+        },
+        objectives: this.objectives.map((objective) => ({
+          id: objective.id,
+          alive: Boolean(objective.entity && !objective.entity.unit.dead),
+          hp: objective.entity ? Math.round(objective.entity.unit.hp) : null,
+          pos: objective.entity ? { ...objective.entity.unit.pos } : null,
+          nextSpawnAt: objective.nextSpawnAt,
+          permanentlyGone: objective.permanentlyGone,
+        })),
+      }),
       structureHp: () => this.allEntities
         .filter((e) => e.unit.kind === 'turret' || e.unit.kind === 'nexus')
         .map((e) => ({ id: e.unit.id, hp: Math.round(e.unit.hp) })),
@@ -1629,20 +1657,20 @@ export default class BattleScene extends Phaser.Scene {
     if (!champion || !entity.body.active) return;
     const lockedUntil = entity.poseLockedUntil ?? 0;
     const currentPriority = entity.posePriority ?? 0;
-    if (this.elapsed < lockedUntil && priority < currentPriority) return;
+    if (this.world.simTime < lockedUntil && priority < currentPriority) return;
     // A pose is now a FRAME of the champion's pixel-art sheet, so switching pose
     // costs an index change instead of rasterizing and caching a new texture.
     // The texture itself never changes, so origin/display size stay valid.
     entity.championPose = pose;
-    entity.body.setFrame(frameForPose(pose, this.elapsed));
-    entity.poseLockedUntil = holdMs > 0 ? this.elapsed + holdMs / 1000 : this.elapsed;
+    entity.body.setFrame(frameForPose(pose, this.world.simTime));
+    entity.poseLockedUntil = holdMs > 0 ? this.world.simTime + holdMs / 1000 : this.world.simTime;
     entity.posePriority = priority;
   }
 
   private refreshChampionLocomotionPoses(): void {
     for (const champion of this.champions) {
       if (!isChampionPresent(champion.life!)) continue;
-      if (this.elapsed < (champion.poseLockedUntil ?? 0)) continue;
+      if (this.world.simTime < (champion.poseLockedUntil ?? 0)) continue;
       this.setChampionPose(champion, champion.movedThisFrame ? 'move' : 'idle');
     }
   }
@@ -1960,10 +1988,10 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private stepAuthority(): void {
-    const nextElapsed = (this.simulationTick + 1) * SIMULATION_TICK_SECONDS;
+    const nextElapsed = (this.world.tick + 1) * SIMULATION_TICK_SECONDS;
     if (nextElapsed > this.rules.hardCapSeconds + Number.EPSILON) return;
-    this.simulationTick += 1;
-    this.elapsed = Math.min(this.rules.hardCapSeconds, this.simulationTick * SIMULATION_TICK_SECONDS);
+    this.world.tick += 1;
+    this.world.simTime = Math.min(this.rules.hardCapSeconds, this.world.tick * SIMULATION_TICK_SECONDS);
     const dt = SIMULATION_TICK_SECONDS;
     this.processScheduledCommands();
     if (this.ended || this.pauseReasons.size > 0) return;
@@ -2004,9 +2032,9 @@ export default class BattleScene extends Phaser.Scene {
     }
     this.regenAndTick(dt);
     this.checkWinLose();
-    if (!this.ended && this.elapsed >= this.nextHudAt) {
+    if (!this.ended && this.world.simTime >= this.nextHudAt) {
       this.pushHud();
-      this.nextHudAt = this.elapsed + HUD_INTERVAL_SECONDS;
+      this.nextHudAt = this.world.simTime + HUD_INTERVAL_SECONDS;
     }
   }
 
@@ -2042,23 +2070,23 @@ export default class BattleScene extends Phaser.Scene {
       if (command.type === 'aim-commit') this.clearAimPreview();
 
       if (canonicalCommand.type === 'pause') {
-        battleStore.recordAuthorityCommand({ ...queued, command: canonicalCommand, targetTick: this.simulationTick });
+        battleStore.recordAuthorityCommand({ ...queued, command: canonicalCommand, targetTick: this.world.tick });
         this.pauseReasons.add(canonicalCommand.reason);
         this.simulationAccumulator = 0;
         this.clearAimPreview();
         this.pushHud();
       } else if (canonicalCommand.type === 'resume') {
-        battleStore.recordAuthorityCommand({ ...queued, command: canonicalCommand, targetTick: this.simulationTick });
+        battleStore.recordAuthorityCommand({ ...queued, command: canonicalCommand, targetTick: this.world.tick });
         this.pauseReasons.delete(canonicalCommand.reason);
         this.simulationAccumulator = 0;
         this.pushHud();
       } else if (canonicalCommand.type === 'surrender') {
-        battleStore.recordAuthorityCommand({ ...queued, command: canonicalCommand, targetTick: this.simulationTick });
+        battleStore.recordAuthorityCommand({ ...queued, command: canonicalCommand, targetTick: this.world.tick });
         this.endAbandoned();
         return;
       } else {
         const backlogTicks = Math.floor(this.simulationAccumulator / SIMULATION_TICK_SECONDS);
-        const targetTick = this.simulationTick + backlogTicks + 1;
+        const targetTick = this.world.tick + backlogTicks + 1;
         const scheduled = { ...queued, command: canonicalCommand, targetTick };
         this.scheduledCommands.push(scheduled);
         battleStore.recordAuthorityCommand(scheduled);
@@ -2068,8 +2096,8 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private processScheduledCommands(): void {
-    const due = this.scheduledCommands.filter((queued) => queued.targetTick <= this.simulationTick);
-    this.scheduledCommands = this.scheduledCommands.filter((queued) => queued.targetTick > this.simulationTick);
+    const due = this.scheduledCommands.filter((queued) => queued.targetTick <= this.world.tick);
+    this.scheduledCommands = this.scheduledCommands.filter((queued) => queued.targetTick > this.world.tick);
     for (const queued of due) this.processCommand(queued.command);
   }
 
@@ -2079,7 +2107,7 @@ export default class BattleScene extends Phaser.Scene {
     // counted twice - a per-input-handler hook would have to be repeated for the
     // pointer, the keyboard and the on-screen buttons.
     this.recordGhostObservation(command);
-    if (this.pauseReasons.size > 0 || this.elapsed >= this.rules.hardCapSeconds) return;
+    if (this.pauseReasons.size > 0 || this.world.simTime >= this.rules.hardCapSeconds) return;
     if (command.type === 'purchase') {
       this.processPurchase(command.itemId);
     } else if (command.type === 'arm-cast') {
@@ -2108,7 +2136,7 @@ export default class BattleScene extends Phaser.Scene {
       this.attackMoveArmed = false;
       this.playerOrder = 'move';
       this.moveTarget = { ...command.point };
-      this.targetByEntityId.delete(this.player.unit.id);
+      delete this.world.targets[this.player.unit.id];
     } else if (command.type === 'target-at') {
       this.cancelRecall('movement');
       this.attackMoveArmed = false;
@@ -2116,24 +2144,24 @@ export default class BattleScene extends Phaser.Scene {
       if (target) {
         this.playerOrder = 'target';
         this.moveTarget = null;
-        this.targetByEntityId.set(this.player.unit.id, target.unit.id);
+        this.world.targets[this.player.unit.id] = target.unit.id;
       } else {
         this.playerOrder = 'move';
         this.moveTarget = { ...command.point };
-        this.targetByEntityId.delete(this.player.unit.id);
+        delete this.world.targets[this.player.unit.id];
       }
     } else if (command.type === 'attack-move-to') {
       this.cancelRecall('movement');
       this.attackMoveArmed = false;
       this.playerOrder = 'attack-move';
       this.moveTarget = { ...command.point };
-      this.targetByEntityId.delete(this.player.unit.id);
+      delete this.world.targets[this.player.unit.id];
     } else if (command.type === 'stop') {
       this.cancelRecall('movement');
       this.attackMoveArmed = false;
       this.moveTarget = null;
       this.playerOrder = 'stop';
-      this.targetByEntityId.delete(this.player.unit.id);
+      delete this.world.targets[this.player.unit.id];
     } else if (command.type === 'recall') {
       this.startRecall();
     } else if (command.type === 'surrender') {
@@ -2147,7 +2175,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private startRecall() {
     if (!isChampionPresent(this.player.life!) || this.inBase(this.player.unit, 'ally')) return;
-    this.recallStartedAt = this.elapsed;
+    this.recallStartedAt = this.world.simTime;
     this.recallCancellation = '';
     this.playerOrder = 'stop';
     this.moveTarget = null;
@@ -2160,7 +2188,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private tickRecall() {
-    if (this.recallStartedAt === null || this.elapsed - this.recallStartedAt < 6) return;
+    if (this.recallStartedAt === null || this.world.simTime - this.recallStartedAt < 6) return;
     this.player.unit.pos = { ...BASE_POSITIONS.ally };
     this.recallStartedAt = null;
   }
@@ -2239,7 +2267,7 @@ export default class BattleScene extends Phaser.Scene {
           this.champions.filter((c) => c.bot).map((c) => [c.unit.id, c.bot!.buffs]),
         ),
       },
-      this.elapsed,
+      this.world.simTime,
     );
     this.playerBuffs = expired.player;
     for (const champion of this.champions) {
@@ -2247,13 +2275,13 @@ export default class BattleScene extends Phaser.Scene {
     }
     const allyWasActive = this.allyBaron.active;
     const enemyWasActive = this.enemyBaron.active;
-    const baron = advanceBaron({ ally: this.allyBaron, enemy: this.enemyBaron }, this.elapsed);
+    const baron = advanceBaron({ ally: this.allyBaron, enemy: this.enemyBaron }, this.world.simTime);
     this.allyBaron = baron.ally;
     this.enemyBaron = baron.enemy;
     if (allyWasActive !== this.allyBaron.active) this.applyTeamChampionStats('ally');
     if (enemyWasActive !== this.enemyBaron.active) this.applyTeamChampionStats('enemy');
     for (const runtime of this.camps) {
-      if (runtime.members.length === 0 && this.elapsed >= runtime.nextSpawnAt) {
+      if (runtime.members.length === 0 && this.world.simTime >= runtime.nextSpawnAt) {
         runtime.members = this.spawnCamp(runtime.camp);
       }
     }
@@ -2263,16 +2291,16 @@ export default class BattleScene extends Phaser.Scene {
       if (
         runtime.id === 'herald' &&
         runtime.entity &&
-        this.elapsed > this.rules.objectives.heraldEndSeconds
+        this.world.simTime > this.rules.objectives.heraldEndSeconds
       ) {
         runtime.entity.unit.dead = true;
         runtime.entity = null;
         runtime.permanentlyGone = true;
         continue;
       }
-      if (runtime.permanentlyGone || runtime.entity || this.elapsed < runtime.nextSpawnAt) continue;
-      if (runtime.id === 'herald' && !isHeraldWindowOpen(this.elapsed)) {
-        if (this.elapsed > this.rules.objectives.heraldEndSeconds) runtime.permanentlyGone = true;
+      if (runtime.permanentlyGone || runtime.entity || this.world.simTime < runtime.nextSpawnAt) continue;
+      if (runtime.id === 'herald' && !isHeraldWindowOpen(this.world.simTime)) {
+        if (this.world.simTime > this.rules.objectives.heraldEndSeconds) runtime.permanentlyGone = true;
         continue;
       }
       runtime.entity = this.spawnObjective(runtime.id);
@@ -2324,7 +2352,7 @@ export default class BattleScene extends Phaser.Scene {
         pending: this.pendingWaveSpawns,
         nextOrder: this.authorityInsertionOrder,
       },
-      this.elapsed,
+      this.world.simTime,
       this.lanes,
       { killedAt: this.inhibitorKillTimes },
       (now, killedAt) => isInhibitorAlive(now, killedAt, this.mode),
@@ -2336,7 +2364,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private processWaveSpawns() {
-    const partitioned = partitionImpacts(this.pendingWaveSpawns, this.elapsed);
+    const partitioned = partitionImpacts(this.pendingWaveSpawns, this.world.simTime);
     this.pendingWaveSpawns = partitioned.pending;
     const liveByBucket = new Map<string, number>();
     for (const minion of this.minions) {
@@ -2353,7 +2381,7 @@ export default class BattleScene extends Phaser.Scene {
       if (live >= MAX_LIVE_MINIONS_PER_SIDE_LANE) {
         this.pendingWaveSpawns.push({
           ...spawn,
-          dueAt: this.elapsed + WAVE_SPAWN_RETRY_SECONDS,
+          dueAt: this.world.simTime + WAVE_SPAWN_RETRY_SECONDS,
         });
         continue;
       }
@@ -2414,8 +2442,8 @@ export default class BattleScene extends Phaser.Scene {
     for (const e of this.allEntities) {
       // The single per-tick expiry. Everything else READS effects; see effects.ts for
       // why a mutating query is a rollback hazard.
-      expireEffects(e.effects, this.elapsed);
-      const pull = readPull(e.effects, this.elapsed);
+      expireEffects(e.effects, this.world.simTime);
+      const pull = readPull(e.effects, this.world.simTime);
       if (pull && !e.unit.dead) {
         const pullDistance = distance(e.unit.pos, pull.destination);
         if (pullDistance > 1) {
@@ -2514,17 +2542,17 @@ export default class BattleScene extends Phaser.Scene {
     // Difficulty changes both how quickly a bot can react and how often it may
     // reconsider. Keep executing the accepted intent between decisions so the
     // simulation remains smooth rather than freezing between AI ticks.
-    if (state.pendingIntent && this.elapsed >= state.intentReadyAt) {
+    if (state.pendingIntent && this.world.simTime >= state.intentReadyAt) {
       state.currentIntent = state.pendingIntent;
       state.pendingIntent = null;
     }
-    if (this.elapsed >= state.nextDecisionAt) {
+    if (this.world.simTime >= state.nextDecisionAt) {
       const snapshot = this.buildAiSnapshot(bot, target);
       state.pendingIntent = this.opponentGhost
         ? ghostDecide(snapshot, this.opponentGhost)
         : decideAction(snapshot);
-      state.intentReadyAt = this.elapsed + cadence.reactionDelayMs / 1000;
-      state.nextDecisionAt = this.elapsed + cadence.decisionIntervalMs / 1000;
+      state.intentReadyAt = this.world.simTime + cadence.reactionDelayMs / 1000;
+      state.nextDecisionAt = this.world.simTime + cadence.decisionIntervalMs / 1000;
     }
 
     const intent = state.currentIntent;
@@ -2767,14 +2795,14 @@ export default class BattleScene extends Phaser.Scene {
 
     // dt is 0: the scene already advanced this unit's cooldown in regenAndTick, and passing a real dt here would advance
     // it twice. The step is being asked to DECIDE, not to keep time.
-    const result = resolveAutoAttacks([attacker], reachable, this.autoAttackTargets, 0, BASIC_PROJECTILE_SPEED);
-    this.autoAttackTargets = result.targets;
+    const result = resolveAutoAttacks([attacker], reachable, this.world.targets, 0, BASIC_PROJECTILE_SPEED);
+    this.world.targets = result.targets;
 
     for (const shot of result.shots) {
       const target = reachable.find((candidate) => candidate.id === shot.targetId);
       if (!target) continue;
       const dueAt = this.queueTargetedImpact(entity, target, shot.rawDamage, color, BASIC_PROJECTILE_SPEED);
-      const ms = Math.max(1, (dueAt - this.elapsed) * 1000);
+      const ms = Math.max(1, (dueAt - this.world.simTime) * 1000);
       if (drawAs === 'beam') this.drawBeam(u.pos, target.pos, color, ms);
       else this.drawProjectile(u.pos, target.pos, color, ms);
       resetAttackCooldown(u);
@@ -2824,7 +2852,7 @@ export default class BattleScene extends Phaser.Scene {
         dead: target.dead,
         damageable: Boolean(targetEntity && this.isEntityDamageable(targetEntity)),
       },
-      this.elapsed,
+      this.world.simTime,
       this.world.passives,
     );
     // Safe on both arms: a blocked plan returns the SAME state object, so this cannot bank a stack for a whiffed swing.
@@ -2849,7 +2877,7 @@ export default class BattleScene extends Phaser.Scene {
         u.pos,
         target.pos,
         0xf0e6d2,
-        Math.max(1, (dueAt - this.elapsed) * 1000),
+        Math.max(1, (dueAt - this.world.simTime) * 1000),
       );
     } else {
       this.applyTargetedDamage(attacker, targetEntity, plan.rawDamage, 0xf0e6d2);
@@ -2927,9 +2955,9 @@ export default class BattleScene extends Phaser.Scene {
     if (!target) return;
     if (champion.id === 'dawnsong') {
       const key = `dawnsong-passive:${caster.unit.id}`;
-      if ((this.internalCooldowns.get(key) ?? 0) <= this.elapsed) {
+      if ((this.internalCooldowns.get(key) ?? 0) <= this.world.simTime) {
         applyHeal(target.unit, 35);
-        this.internalCooldowns.set(key, this.elapsed + 3);
+        this.internalCooldowns.set(key, this.world.simTime + 3);
       }
     } else if (champion.id === 'wardlight') {
       const key = `wardlight-passive:${caster.unit.id}`;
@@ -3033,7 +3061,7 @@ export default class BattleScene extends Phaser.Scene {
       endpoint,
       aimedAllyId: aimedAlly?.unit.id ?? null,
       executeTargetId: executeTarget?.id ?? null,
-      now: this.elapsed,
+      now: this.world.simTime,
       hasChronoCore: (caster === this.player ? this.ownedItems : caster.bot?.ownedItems ?? []).includes('chronoCore'),
     });
 
@@ -3085,7 +3113,7 @@ export default class BattleScene extends Phaser.Scene {
              * order the next minion would receive, making minion ids depend on how many abilities had been cast. On a
              * replay where a cast lands differently, every later minion id moves.
              */
-            id: trapIdFor(caster.unit.id, this.elapsed),
+            id: trapIdFor(caster.unit.id, this.world.simTime),
             source: { ...caster.unit, pos: { ...origin } },
             point: { ...op.point },
             radius: op.radius,
@@ -3098,17 +3126,17 @@ export default class BattleScene extends Phaser.Scene {
           break;
         case 'damage': {
           const dueAt = op.dashes
-            ? this.elapsed
-            : projectileImpactTime(this.elapsed, op.origin, op.endpoint, SKILLSHOT_PROJECTILE_SPEED);
+            ? this.world.simTime
+            : projectileImpactTime(this.world.simTime, op.origin, op.endpoint, SKILLSHOT_PROJECTILE_SPEED);
           if (op.area) this.drawAoe(op.endpoint, op.radius, color);
           else if (!op.dashes) {
-            this.drawProjectile(op.origin, op.endpoint, color, Math.max(1, (dueAt - this.elapsed) * 1000));
+            this.drawProjectile(op.origin, op.endpoint, color, Math.max(1, (dueAt - this.world.simTime) * 1000));
           }
           this.pendingImpacts.push({
             dueAt,
             // The impact queue's OWN counter. Separated from the wave scheduler's in this commit: they are two different
             // monotonic sequences and sharing one made each depend on the other's traffic.
-            insertionOrder: this.impactInsertionOrder++,
+            insertionOrder: this.world.nextInsertionOrder++,
             source: { ...caster.unit, pos: { ...op.origin } },
             ...(op.targetId
               ? { targetId: op.targetId }
@@ -3193,9 +3221,9 @@ export default class BattleScene extends Phaser.Scene {
     // Pure reads. These used to be activePull/strongestSlow/strongestMovementBuff, each
     // of which expired effects as a side effect - three mutating queries per unit per
     // frame. Expiry now happens once per tick in advanceEffects(); see effects.ts.
-    if (entity && readPull(entity.effects, this.elapsed)) return;
+    if (entity && readPull(entity.effects, this.world.simTime)) return;
     const smokeMultiplier = entity?.champion?.id === 'nightveil' &&
-      (this.internalCooldowns.get(`nightveil-smoke:${u.id}`) ?? 0) > this.elapsed ? 1.2 : 1;
+      (this.internalCooldowns.get(`nightveil-smoke:${u.id}`) ?? 0) > this.world.simTime ? 1.2 : 1;
     const huntingBonus = entity?.champion?.id === 'grimtrail' && this.champions.some(
       (candidate) => areHostile(u.team, candidate.unit.team) && !candidate.unit.dead &&
         candidate.unit.hp / candidate.unit.maxHp < 0.35 && distance(u.pos, candidate.unit.pos) <= 700,
@@ -3211,8 +3239,8 @@ export default class BattleScene extends Phaser.Scene {
       {
         speedMultiplier: smokeMultiplier,
         flatBonus: huntingBonus,
-        buffFraction: effectState ? readMovementBuff(effectState, this.elapsed) : 0,
-        slowFactor: effectState ? readSlow(effectState, this.elapsed) : 0,
+        buffFraction: effectState ? readMovementBuff(effectState, this.world.simTime) : 0,
+        slowFactor: effectState ? readSlow(effectState, this.world.simTime) : 0,
       },
       {
         minX: 0,
@@ -3232,12 +3260,12 @@ export default class BattleScene extends Phaser.Scene {
   private advanceChampionLives() {
     for (const entity of this.champions) {
       const previous = entity.life!;
-      const next = advanceChampionLife(previous, this.elapsed, this.mode);
+      const next = advanceChampionLife(previous, this.world.simTime, this.mode);
       entity.life = next;
       if (!isChampionPresent(next)) {
         entity.unit.dead = true;
         const showingDeathPose =
-          entity.championPose === 'death' && this.elapsed < (entity.deathVisibleUntil ?? 0);
+          entity.championPose === 'death' && this.world.simTime < (entity.deathVisibleUntil ?? 0);
         entity.container.setVisible(showingDeathPose);
         entity.shadow?.setVisible(false);
         continue;
@@ -3256,21 +3284,21 @@ export default class BattleScene extends Phaser.Scene {
           entity.bot.pushIndex = 0;
           entity.bot.currentIntent = 'approach';
           entity.bot.pendingIntent = null;
-          entity.bot.intentReadyAt = this.elapsed;
-          entity.bot.nextDecisionAt = this.elapsed;
+          entity.bot.intentReadyAt = this.world.simTime;
+          entity.bot.nextDecisionAt = this.world.simTime;
         }
         entity.poseLockedUntil = 0;
         entity.posePriority = 0;
         entity.deathVisibleUntil = undefined;
         this.setChampionPose(entity, 'idle');
-        this.targetByEntityId.delete(entity.unit.id);
+        delete this.world.targets[entity.unit.id];
       }
     }
   }
 
   private reviveInhibitors() {
     for (const [id, killedAt] of Object.entries(this.inhibitorKillTimes)) {
-      if (!isInhibitorAlive(this.elapsed, killedAt, this.mode)) continue;
+      if (!isInhibitorAlive(this.world.simTime, killedAt, this.mode)) continue;
       const inhibitor = this.structureById.get(id);
       if (inhibitor) {
         inhibitor.unit.dead = false;
@@ -3321,7 +3349,7 @@ export default class BattleScene extends Phaser.Scene {
         slowDuration: trap.slowDuration,
       })),
       bodies.map((e) => ({ id: e.unit.id, pos: e.unit.pos })),
-      this.elapsed,
+      this.world.simTime,
       // Judged per TRAP, using that trap's own source — which is why the step takes a callback rather than a flag.
       (trapState, candidate) => {
         const trap = byId.get(trapState.id);
@@ -3367,7 +3395,7 @@ export default class BattleScene extends Phaser.Scene {
     const profile = monsterStats(id);
     const pit = EPIC_PITS.find((candidate) => candidate.id === id)!;
     const pos = pit.pos;
-    const unit = this.makeUnit(`objective-${id}-${Math.round(this.elapsed * 1000)}`, 'monster', 'neutral', pos, {
+    const unit = this.makeUnit(`objective-${id}-${Math.round(this.world.simTime * 1000)}`, 'monster', 'neutral', pos, {
       maxHp: profile.hp,
       ad: profile.ad,
       armor: profile.armor,
@@ -3500,10 +3528,10 @@ export default class BattleScene extends Phaser.Scene {
     color: number,
     speed: number,
   ): number {
-    const dueAt = projectileImpactTime(this.elapsed, source.unit.pos, target.pos, speed);
+    const dueAt = projectileImpactTime(this.world.simTime, source.unit.pos, target.pos, speed);
     this.pendingImpacts.push({
       dueAt,
-      insertionOrder: this.impactInsertionOrder++,
+      insertionOrder: this.world.nextInsertionOrder++,
       source: { ...source.unit, pos: { ...source.unit.pos } },
       targetId: target.id,
       radius: 0,
@@ -3519,7 +3547,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private processPendingImpacts() {
-    const partitioned = partitionImpacts(this.pendingImpacts, this.elapsed);
+    const partitioned = partitionImpacts(this.pendingImpacts, this.world.simTime);
     this.pendingImpacts = partitioned.pending;
     for (const impact of partitioned.due.sort((a, b) => a.dueAt - b.dueAt || a.insertionOrder - b.insertionOrder)) {
       const source = impact.source;
@@ -3606,18 +3634,18 @@ export default class BattleScene extends Phaser.Scene {
     const sourceUnit = 'unit' in source ? source.unit : source;
     if (!this.canDamageTarget(sourceUnit, target)) return;
     const hpPctBefore = target.unit.maxHp > 0 ? target.unit.hp / target.unit.maxHp : 0;
-    const result = applyDamageWithEffects(target.unit, target.effects, rawDamage, this.elapsed);
+    const result = applyDamageWithEffects(target.unit, target.effects, rawDamage, this.world.simTime);
     const sourceEntity = this.entityById.get(sourceUnit.id);
     if (options.ability && !options.periodic && sourceEntity?.champion?.id === 'embermage' && !result.lethal) {
       const burnTotal = 25 + (sourceEntity.abilityPower ?? 0) * 0.1;
-      applyBurn(target.effects, sourceUnit.id, burnTotal / 3, this.elapsed + 3);
+      applyBurn(target.effects, sourceUnit.id, burnTotal / 3, this.world.simTime + 3);
     }
     if (
       options.ability && sourceEntity?.champion?.id === 'frostquill' &&
       (options.stunDuration ?? 0) === 0 && !result.lethal
-    ) applySlow(target.effects, `frostquill:${sourceUnit.id}`, 0.2, this.elapsed + 1.5);
+    ) applySlow(target.effects, `frostquill:${sourceUnit.id}`, 0.2, this.world.simTime + 1.5);
     if ((options.slowPercent ?? 0) > 0 && !result.lethal) {
-      applySlow(target.effects, `ability:${sourceUnit.id}`, options.slowPercent!, this.elapsed + (options.slowDuration ?? 0));
+      applySlow(target.effects, `ability:${sourceUnit.id}`, options.slowPercent!, this.world.simTime + (options.slowDuration ?? 0));
     }
     if ((options.pullDuration ?? 0) > 0 && !result.lethal) {
       applyPull(
@@ -3625,31 +3653,31 @@ export default class BattleScene extends Phaser.Scene {
         `ability:${sourceUnit.id}`,
         sourceUnit.pos,
         600,
-        this.elapsed + options.pullDuration!,
+        this.world.simTime + options.pullDuration!,
       );
     }
     const sourceBuffs = sourceEntity === this.player ? this.playerBuffs : sourceEntity?.bot?.buffs;
     if (
       !options.ability && sourceBuffs?.buffs.some((buff) => buff.kind === 'red') && !result.lethal
-    ) applySlow(target.effects, `red-buff:${sourceUnit.id}`, 0.2, this.elapsed + 2);
+    ) applySlow(target.effects, `red-buff:${sourceUnit.id}`, 0.2, this.world.simTime + 2);
 
     const targetItems = target === this.player ? this.ownedItems : target.bot?.ownedItems ?? [];
     const hpPctAfter = target.unit.maxHp > 0 ? target.unit.hp / target.unit.maxHp : 0;
     const aegisKey = `aegis:${target.unit.id}`;
     if (
       targetItems.includes('aegisColossus') && hpPctBefore > 0.3 && hpPctAfter <= 0.3 &&
-      (this.internalCooldowns.get(aegisKey) ?? 0) <= this.elapsed && !result.lethal
+      (this.internalCooldowns.get(aegisKey) ?? 0) <= this.world.simTime && !result.lethal
     ) {
-      applyShield(target.effects, 'aegisColossus', 200, this.elapsed + 4);
-      this.internalCooldowns.set(aegisKey, this.elapsed + 45);
+      applyShield(target.effects, 'aegisColossus', 200, this.world.simTime + 4);
+      this.internalCooldowns.set(aegisKey, this.world.simTime + 45);
     }
     const ironholdKey = `ironhold-passive:${target.unit.id}`;
     if (
       target.champion?.id === 'ironhold' && hpPctBefore > 0.35 && hpPctAfter <= 0.35 &&
-      (this.internalCooldowns.get(ironholdKey) ?? 0) <= this.elapsed && !result.lethal
+      (this.internalCooldowns.get(ironholdKey) ?? 0) <= this.world.simTime && !result.lethal
     ) {
-      applyArmor(target.effects, ironholdKey, 25, this.elapsed + 3);
-      this.internalCooldowns.set(ironholdKey, this.elapsed + 12);
+      applyArmor(target.effects, ironholdKey, 25, this.world.simTime + 3);
+      this.internalCooldowns.set(ironholdKey, this.world.simTime + 12);
     }
     if (target.champion?.id === 'nightveil' && result.dealt > 0) {
       this.internalCooldowns.set(`nightveil-smoke:${target.unit.id}`, 0);
@@ -3659,8 +3687,8 @@ export default class BattleScene extends Phaser.Scene {
       sourceEntity.unit.kind === 'champion' && !sourceEntity.unit.dead
     ) {
       const reflectKey = `thorn-reflect:${target.unit.id}:${sourceUnit.id}`;
-      if ((this.internalCooldowns.get(reflectKey) ?? 0) <= this.elapsed) {
-        this.internalCooldowns.set(reflectKey, this.elapsed + 1);
+      if ((this.internalCooldowns.get(reflectKey) ?? 0) <= this.world.simTime) {
+        this.internalCooldowns.set(reflectKey, this.world.simTime + 1);
         this.applyTargetedDamage(target, sourceEntity, 12, 0x59b07e, { ability: true, periodic: true });
       }
     }
@@ -3702,7 +3730,7 @@ export default class BattleScene extends Phaser.Scene {
       const level = targetEntity === this.player
         ? this.playerProgress.level
         : targetEntity.bot?.progress.level ?? 1;
-      targetEntity.life = killChampion(targetEntity.life, this.elapsed, level, this.mode);
+      targetEntity.life = killChampion(targetEntity.life, this.world.simTime, level, this.mode);
       if (targetEntity.champion?.id === 'duskarrow') {
         this.world.passives = {
           counters: { ...this.world.passives.counters, [passiveKeys.duskarrowDistance(target.id)]: 0 },
@@ -3737,7 +3765,7 @@ export default class BattleScene extends Phaser.Scene {
         killerSide: sourceSide,
       });
       this.awardBounty(sourceEntity, outcome.bounty);
-      if (outcome.startsInhibitorRespawn) this.inhibitorKillTimes[target.id] = this.elapsed;
+      if (outcome.startsInhibitorRespawn) this.inhibitorKillTimes[target.id] = this.world.simTime;
       if (source.id === 'player' && node?.kind.endsWith('Turret')) this.recordLearning('destroy-turret');
     } else if (target.kind === 'monster' && targetEntity?.campId) {
       const runtime = this.camps.find((candidate) => candidate.camp.id === targetEntity.campId);
@@ -3745,10 +3773,10 @@ export default class BattleScene extends Phaser.Scene {
         runtime.members = runtime.members.filter((member) => member !== targetEntity && !member.unit.dead);
         if (runtime.members.length === 0) {
           this.awardBounty(sourceEntity, runtime.camp.bounty);
-          runtime.nextSpawnAt = this.elapsed + runtime.camp.respawnSeconds;
+          runtime.nextSpawnAt = this.world.simTime + runtime.camp.respawnSeconds;
           if (runtime.camp.type === 'blue' || runtime.camp.type === 'red') {
             const buffs = sourceEntity === this.player ? this.playerBuffs : sourceEntity?.bot?.buffs;
-            if (buffs) applyBuff(buffs, runtime.camp.type, this.elapsed);
+            if (buffs) applyBuff(buffs, runtime.camp.type, this.world.simTime);
           }
         }
       }
@@ -3761,21 +3789,21 @@ export default class BattleScene extends Phaser.Scene {
       if (runtime) {
         runtime.entity = null;
         if (objectiveId === 'herald') runtime.permanentlyGone = true;
-        else runtime.nextSpawnAt = this.elapsed + this.rules.objectives.respawnSeconds;
+        else runtime.nextSpawnAt = this.world.simTime + this.rules.objectives.respawnSeconds;
       }
       if (objectiveId === 'dragon') {
         if (sourceSide === 'ally') this.allyDragonStacks += 1;
         else this.enemyDragonStacks += 1;
         this.applyTeamChampionStats(sourceSide);
       } else if (objectiveId === 'baron') {
-        if (sourceSide === 'ally') this.allyBaron = applyBaronBuff(this.elapsed);
-        else this.enemyBaron = applyBaronBuff(this.elapsed);
+        if (sourceSide === 'ally') this.allyBaron = applyBaronBuff(this.world.simTime);
+        else this.enemyBaron = applyBaronBuff(this.world.simTime);
         this.applyTeamChampionStats(sourceSide);
       } else {
         const reward = heraldReward();
         this.world.wardenCharges[sourceSide] = {
-          acquiredAt: this.elapsed,
-          expiresAt: this.elapsed + reward.durationSeconds,
+          acquiredAt: this.world.simTime,
+          expiresAt: this.world.simTime + reward.durationSeconds,
         };
       }
     }
@@ -3826,7 +3854,7 @@ export default class BattleScene extends Phaser.Scene {
     // happen on ticks where nothing wants to deploy.
     this.world.wardenCharges = advanceWardenCharges(
       { ally: this.world.wardenCharges.ally, enemy: this.world.wardenCharges.enemy },
-      this.elapsed,
+      this.world.simTime,
     );
     const charge = this.world.wardenCharges.enemy;
     const targets = this.wardenTargets('enemy');
@@ -3838,7 +3866,7 @@ export default class BattleScene extends Phaser.Scene {
         distance(entity.unit.pos, target.unit.pos) <= 650,
     ));
     if (shouldDeployHeldWarden({
-      now: this.elapsed,
+      now: this.world.simTime,
       charge,
       hasValidTarget: targets.length > 0,
       hasSiegePressure,
@@ -3849,7 +3877,7 @@ export default class BattleScene extends Phaser.Scene {
     const targets = this.wardenTargets(sourceSide);
     const plan = planWardenSpend({
       charge: this.world.wardenCharges[sourceSide],
-      now: this.elapsed,
+      now: this.world.simTime,
       orderedTargetIds: targets.map((entity) => entity.unit.id),
       preferredTargetId: chosenTarget?.unit.id ?? null,
     });
@@ -3864,7 +3892,7 @@ export default class BattleScene extends Phaser.Scene {
     if (!target) return;
     this.world.wardenCharges[sourceSide] = null;
     const source = sourceSide === 'ally' ? this.player.unit : this.enemy.unit;
-    const result = applyDamageWithEffects(target.unit, target.effects, plan.rawDamage, this.elapsed);
+    const result = applyDamageWithEffects(target.unit, target.effects, plan.rawDamage, this.world.simTime);
     this.registerKill(source, target.unit, result.lethal);
     this.onDamage(target, target.unit.pos, result.dealt, 0xc18cff, result.lethal, {
       fromPos: source.pos,
@@ -3904,7 +3932,7 @@ export default class BattleScene extends Phaser.Scene {
       }
       return true;
     });
-    const currentId = this.targetByEntityId.get(u.id) ?? null;
+    const currentId = this.world.targets[u.id] ?? null;
     const persistent = persistentEnemy(u, candidates, currentId, maxRange);
     if (currentId && persistent?.id === currentId) return persistent;
 
@@ -3916,8 +3944,8 @@ export default class BattleScene extends Phaser.Scene {
       maxRange,
       preferStructures,
     );
-    if (acquired) this.targetByEntityId.set(u.id, acquired.id);
-    else this.targetByEntityId.delete(u.id);
+    if (acquired) this.world.targets[u.id] = acquired.id;
+    else delete this.world.targets[u.id];
     return acquired;
   }
 
@@ -3992,7 +4020,7 @@ export default class BattleScene extends Phaser.Scene {
       // pose CHANGES, so without this a walking champion would hold a single
       // RUN frame; re-deriving the frame every render is what animates it.
       if (e.champion && e.championPose === 'move' && e.body.active) {
-        e.body.setFrame(frameForPose('move', this.elapsed));
+        e.body.setFrame(frameForPose('move', this.world.simTime));
       }
       if (e.hpBar) {
         const full = e.hpBar.getData('width') as number;
@@ -4009,7 +4037,7 @@ export default class BattleScene extends Phaser.Scene {
         e.shadow?.destroy();
         e.container.destroy();
         this.entityById.delete(e.unit.id);
-        this.targetByEntityId.delete(e.unit.id);
+        delete this.world.targets[e.unit.id];
       }
       if (e.unit.dead && (e.unit.kind === 'turret' || e.unit.kind === 'nexus') && e.container.visible) {
         e.container.setAlpha(0.25);
@@ -4133,7 +4161,7 @@ export default class BattleScene extends Phaser.Scene {
     this.floatingDamage(pos, amount, color, '', importance);
     if (target) {
       if (target.champion) {
-        if (lethal) target.deathVisibleUntil = this.elapsed + CHAMPION_DEATH_POSE_MS / 1000;
+        if (lethal) target.deathVisibleUntil = this.world.simTime + CHAMPION_DEATH_POSE_MS / 1000;
         this.setChampionPose(
           target,
           lethal ? 'death' : 'hit',
@@ -4538,7 +4566,7 @@ export default class BattleScene extends Phaser.Scene {
         inhibitorsMax += 1;
         // Inhibitors "respawn" per the pure rule; treat as alive if respawned.
         const killedAt = this.inhibitorKillTimes[s.node.id] ?? null;
-        if (isInhibitorAlive(this.elapsed, killedAt) && !s.unit.dead) inhibitors += 1;
+        if (isInhibitorAlive(this.world.simTime, killedAt) && !s.unit.dead) inhibitors += 1;
       }
     }
     const nexus = side === 'ally' ? this.allyNexus : this.enemyNexus;
@@ -4583,7 +4611,7 @@ export default class BattleScene extends Phaser.Scene {
       enemyMaxHp: Math.round(this.enemy.unit.maxHp),
       allyNexusPct: this.allyNexus ? this.allyNexus.unit.hp / this.allyNexus.unit.maxHp : 1,
       enemyNexusPct: this.enemyNexus ? this.enemyNexus.unit.hp / this.enemyNexus.unit.maxHp : 1,
-      elapsed: this.elapsed,
+      elapsed: this.world.simTime,
       gold: Math.floor(this.playerProgress.gold),
       level: this.playerProgress.level,
       xpPct,
@@ -4593,10 +4621,10 @@ export default class BattleScene extends Phaser.Scene {
       buffs: [
         ...this.playerBuffs.buffs.map((b) => ({
           kind: b.kind as string,
-          remaining: Math.ceil(b.expiresAt - this.elapsed),
+          remaining: Math.ceil(b.expiresAt - this.world.simTime),
         })),
         ...(this.allyBaron.active
-          ? [{ kind: 'baron', remaining: Math.ceil(this.allyBaron.expiresAt - this.elapsed) }]
+          ? [{ kind: 'baron', remaining: Math.ceil(this.allyBaron.expiresAt - this.world.simTime) }]
           : []),
       ],
       camps: this.camps.map((runtime) => ({
@@ -4606,7 +4634,7 @@ export default class BattleScene extends Phaser.Scene {
         alive: runtime.members.length > 0,
         membersAlive: runtime.members.filter((member) => !member.unit.dead).length,
         membersTotal: runtime.camp.members.length,
-        respawnsIn: runtime.members.length > 0 ? 0 : Math.max(0, Math.ceil(runtime.nextSpawnAt - this.elapsed)),
+        respawnsIn: runtime.members.length > 0 ? 0 : Math.max(0, Math.ceil(runtime.nextSpawnAt - this.world.simTime)),
       })),
       objectives: this.buildObjectives(),
       ...(this.armedAbility ? { aimingSlot: this.armedAbility } : {}),
@@ -4614,28 +4642,28 @@ export default class BattleScene extends Phaser.Scene {
       objectivePoints: this.teamFacts.ally.objectivePoints,
       wardenChargeSeconds: Math.max(
         0,
-        Math.ceil((this.world.wardenCharges.ally?.expiresAt ?? this.elapsed) - this.elapsed),
+        Math.ceil((this.world.wardenCharges.ally?.expiresAt ?? this.world.simTime) - this.world.simTime),
       ),
       playerLife: {
         phase: this.player.life!.phase,
         deaths: this.playerDeaths,
         respawnSeconds:
           this.player.life!.phase === 'dead' || this.player.life!.phase === 'respawning'
-            ? Math.round(championLifeTimerRemaining(this.player.life!, this.elapsed) * 10) / 10
+            ? Math.round(championLifeTimerRemaining(this.player.life!, this.world.simTime) * 10) / 10
             : 0,
         invulnerableSeconds:
           this.player.life!.phase === 'invulnerable'
-            ? Math.round(championLifeTimerRemaining(this.player.life!, this.elapsed) * 10) / 10
+            ? Math.round(championLifeTimerRemaining(this.player.life!, this.world.simTime) * 10) / 10
             : 0,
       },
       matchStatus: {
-        phase: matchPhaseAt(this.elapsed, this.mode),
-        suddenDeath: matchPhaseAt(this.elapsed, this.mode) === 'sudden-death',
-        hardCapSecondsRemaining: Math.max(0, Math.ceil(this.rules.hardCapSeconds - this.elapsed)),
+        phase: matchPhaseAt(this.world.simTime, this.mode),
+        suddenDeath: matchPhaseAt(this.world.simTime, this.mode) === 'sudden-death',
+        hardCapSecondsRemaining: Math.max(0, Math.ceil(this.rules.hardCapSeconds - this.world.simTime)),
       },
       recall: {
         channeling: this.recallStartedAt !== null,
-        remaining: this.recallStartedAt === null ? 0 : Math.max(0, Math.round((6 - (this.elapsed - this.recallStartedAt)) * 10) / 10),
+        remaining: this.recallStartedAt === null ? 0 : Math.max(0, Math.round((6 - (this.world.simTime - this.recallStartedAt)) * 10) / 10),
         ...(this.recallCancellation ? { cancellation: this.recallCancellation } : {}),
       },
       ...(this.matchKind === 'tutorial' ? {
@@ -4645,7 +4673,7 @@ export default class BattleScene extends Phaser.Scene {
           total: LEARNING_STEPS.length,
         },
       } : {}),
-      currentTargetId: this.targetByEntityId.get(this.player.unit.id),
+      currentTargetId: this.world.targets[this.player.unit.id] ?? undefined,
       ...(this.lastPurchaseFeedback ? { purchaseFeedback: this.lastPurchaseFeedback } : {}),
       allyStructures: this.structureStatus('ally'),
       enemyStructures: this.structureStatus('enemy'),
@@ -4673,7 +4701,7 @@ export default class BattleScene extends Phaser.Scene {
       spawnsIn:
         runtime.entity != null || runtime.permanentlyGone
           ? 0
-          : Math.max(0, Math.ceil(runtime.nextSpawnAt - this.elapsed)),
+          : Math.max(0, Math.ceil(runtime.nextSpawnAt - this.world.simTime)),
     }));
   }
 
@@ -4690,7 +4718,7 @@ export default class BattleScene extends Phaser.Scene {
     if (this.ended) return;
     const resolution = resolveMatch(
       {
-        elapsedSeconds: this.elapsed,
+        elapsedSeconds: this.world.simTime,
         ally: this.matchTeamSnapshot('ally'),
         enemy: this.matchTeamSnapshot('enemy'),
       },
@@ -4812,7 +4840,7 @@ export default class BattleScene extends Phaser.Scene {
       endReason: resolution.reason!,
       learningRequirementsCompleted: learningRequirementsCompleted(this.learning),
       stats: {
-        durationSeconds: Math.min(this.rules.hardCapSeconds, Math.round(this.elapsed)),
+        durationSeconds: Math.min(this.rules.hardCapSeconds, Math.round(this.world.simTime)),
         championKills: this.stats.championKills,
         minionKills: this.stats.minionKills,
         damageDealt: Math.round(this.stats.damageDealt),
@@ -4843,7 +4871,7 @@ export default class BattleScene extends Phaser.Scene {
       endReason: 'surrendered',
       learningRequirementsCompleted: false,
       stats: {
-        durationSeconds: Math.round(this.elapsed),
+        durationSeconds: Math.round(this.world.simTime),
         championKills: 0,
         minionKills: 0,
         damageDealt: 0,

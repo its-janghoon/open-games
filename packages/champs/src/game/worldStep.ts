@@ -374,8 +374,6 @@ export interface WorldState {
  */
 export function cloneWorldState(state: WorldState): WorldState {
   return {
-    tick: state.tick,
-    simTime: state.simTime,
     units: state.units.map((unit) => ({ ...unit, pos: { x: unit.pos.x, y: unit.pos.y } })),
     cooldowns: Object.fromEntries(
       Object.entries(state.cooldowns).map(([id, cds]) => [id, { ...cds }]),
@@ -394,7 +392,6 @@ export function cloneWorldState(state: WorldState): WorldState {
       Object.entries(state.lives).map(([id, life]) => [id, { ...life }]),
     ),
     pendingImpacts: state.pendingImpacts.map(cloneImpact),
-    nextInsertionOrder: state.nextInsertionOrder,
     economy: Object.fromEntries(
       Object.entries(state.economy).map(([id, gold]) => [id, { ...gold }]),
     ),
@@ -403,7 +400,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     ),
     waves: cloneWaveSchedule(state.waves),
     minions: cloneMinions(state.minions),
-    targets: { ...state.targets },
     recalls: { ...state.recalls },
     teamFacts: cloneTeamFacts(state.teamFacts),
     // Spread rather than shared: the union's payload is strings today, and sharing would leak a rewritten winner back
@@ -440,15 +436,32 @@ export function cloneWorldState(state: WorldState): WorldState {
  * WorldState the two types are the same type, `cloneWorldState(scene.world)` type-checks, and the adoption is done. Until
  * then the type says exactly how far it has got.
  *
- * Migrated so far: the passive ledger and the held warden charges. Both were already exactly their WorldState shape,
- * which is why they went first — a slice that also has to change shape (the target table is a `Map` in the scene and a
- * `Record` here) hides a reshaping bug inside a move.
+ * Migrated so far: the match clock (`tick` / `simTime`), the impact insertion counter, the passive ledger and the held
+ * warden charges. The two that were already exactly their WorldState shape went first; a slice that also has to change
+ * shape (the target table is a `Map` in the scene and a `Record` here) hides a reshaping bug inside a move.
+ *
+ * ONE HAZARD is now live and must be respected by the next slices. The scene DERIVES `simTime` from the tick
+ * (`tick * SIMULATION_TICK_SECONDS`, clamped at the match hard cap), while {@link advanceEffects} ACCUMULATES it
+ * (`simTime += dt`). Both are correct alone and they agree at a fixed step, but they must not both run against the same
+ * state or the clock advances twice per tick. The scene does not call advanceEffects today; adopting `effects` therefore
+ * means giving the clock a single owner FIRST, not merely moving a field. Deriving from the tick is the one to keep —
+ * accumulation drifts, and a rewind restores an exact tick.
  */
-export type AdoptedWorld = Pick<WorldState, 'passives' | 'wardenCharges'>;
+export type AdoptedWorld = Pick<
+  WorldState,
+  'tick' | 'simTime' | 'nextInsertionOrder' | 'targets' | 'passives' | 'wardenCharges'
+>;
 
 /** The adopted slice at match start. */
 export function createAdoptedWorld(): AdoptedWorld {
-  return { passives: createPassiveState(), wardenCharges: { ally: null, enemy: null } };
+  return {
+    tick: 0,
+    simTime: 0,
+    nextInsertionOrder: 0,
+    targets: {},
+    passives: createPassiveState(),
+    wardenCharges: { ally: null, enemy: null },
+  };
 }
 
 /**
@@ -460,6 +473,10 @@ export function createAdoptedWorld(): AdoptedWorld {
  */
 export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
   return {
+    tick: world.tick,
+    simTime: world.simTime,
+    nextInsertionOrder: world.nextInsertionOrder,
+    targets: { ...world.targets },
     passives: clonePassiveState(world.passives),
     wardenCharges: cloneWardenCharges(world.wardenCharges),
   };

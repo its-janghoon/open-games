@@ -446,8 +446,12 @@ describe('cloneWorldState', () => {
   });
 
   describe('the adopted slice BattleScene owns', () => {
-    it('starts empty: no passive ledger entries and no held charges', () => {
+    it('starts empty: a zeroed clock, no passive ledger entries and no held charges', () => {
       expect(createAdoptedWorld()).toEqual({
+        tick: 0,
+        simTime: 0,
+        nextInsertionOrder: 0,
+        targets: {},
         passives: { counters: {}, deadlines: {} },
         wardenCharges: { ally: null, enemy: null },
       });
@@ -483,9 +487,30 @@ describe('cloneWorldState', () => {
       const copy = cloneWorldState(original);
       copy.passives.counters['duskarrow-distance:a'] = 0;
       copy.wardenCharges.enemy!.expiresAt = 1;
+      copy.tick = 999;
+      copy.simTime = 999;
+      copy.nextInsertionOrder = 999;
 
       expect(original.passives.counters['duskarrow-distance:a']).toBe(250);
       expect(original.wardenCharges.enemy!.expiresAt).toBe(93);
+      expect(original.tick).toBe(7);
+      expect(original.simTime).toBe(12.5);
+      expect(original.nextInsertionOrder).toBe(4);
+    });
+
+    /**
+     * The clock has TWO derivations in this codebase and they must never both run against one state.
+     *
+     * The scene derives `simTime` from the tick (`tick * SIMULATION_TICK_SECONDS`, clamped at the hard cap); advanceEffects
+     * ACCUMULATES it (`simTime += dt`). They agree at a fixed step, which is exactly why a double-advance would not look
+     * like a bug — it would look like a match running slightly fast. This pins the accumulating one so the next slice
+     * cannot adopt `effects` without noticing that the clock needs a single owner first.
+     */
+    it('advanceEffects still advances the clock by accumulation, which the scene must not double', () => {
+      const original = state();
+      const before = original.simTime;
+      advanceEffects(original, 0.5);
+      expect(original.simTime).toBe(before + 0.5);
     });
 
     /**
@@ -502,7 +527,14 @@ describe('cloneWorldState', () => {
         .filter((key) => !adopted.has(key))
         .sort();
 
-      expect([...adopted].sort()).toEqual(['passives', 'wardenCharges']);
+      expect([...adopted].sort()).toEqual([
+        'nextInsertionOrder',
+        'passives',
+        'simTime',
+        'targets',
+        'tick',
+        'wardenCharges',
+      ]);
       expect(remaining).toEqual([
         'autoAttackers',
         'baron',
@@ -515,17 +547,13 @@ describe('cloneWorldState', () => {
         'lives',
         'minions',
         'moveGoals',
-        'nextInsertionOrder',
         'objectives',
         'outcome',
         'pendingImpacts',
         'recalls',
         'resources',
-        'simTime',
         'structures',
-        'targets',
         'teamFacts',
-        'tick',
         'traps',
         'units',
         'waves',
