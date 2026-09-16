@@ -7,7 +7,6 @@ import {
 } from '../../data/champions';
 import {
   advanceAttackCooldown,
-  abilityDamage,
   applyHeal,
   areHostile,
   canBasicAttack,
@@ -177,6 +176,8 @@ import {
 } from '../rift/economy';
 import { composeTeams, enemyFacingSlot } from '../rift/teams';
 import { resolveAutoAttacks, type AutoAttacker } from '../rift/autoAttack';
+import { planCast, type CastActor } from '../rift/abilityEffects';
+import { trapIdFor } from '../rift/traps';
 import type { TargetTable } from '../rift/minionCombat';
 import {
   computeEffectiveStats,
@@ -390,6 +391,24 @@ const NEXUS_HEIGHT_PX = 30;
  */
 function worldLengthToScreen(world: number): number {
   return Math.max(5, world * projectionScale(DEFAULT_PROJECTION).sx);
+}
+
+/**
+ * An Entity reduced to what an ability decision needs.
+ *
+ * `present` uses the champion life phase rather than `!dead`, matching the original ally filter — a respawning champion is
+ * not dead but is not a valid heal target either.
+ */
+function castActorFor(entity: Entity): CastActor {
+  return {
+    id: entity.unit.id,
+    team: entity.unit.team,
+    pos: { ...entity.unit.pos },
+    hp: entity.unit.hp,
+    maxHp: entity.unit.maxHp,
+    abilityPower: entity.abilityPower ?? 0,
+    present: entity.life ? isChampionPresent(entity.life) : !entity.unit.dead,
+  };
 }
 
 function project(p: Vec2): Vec2 {
@@ -685,6 +704,16 @@ export default class BattleScene extends Phaser.Scene {
   private pendingWaveSpawns: PendingWaveSpawn[] = [];
   private authorityInsertionOrder = 0;
 
+  /**
+   * The impact queue's monotonic counter, separate from the wave scheduler's above.
+   *
+   * They were one field. The wave scheduler derives MINION IDENTITY from its order, so every queued impact and every armed
+   * trap shifted the id the next minion would get — a replay in which a cast lands differently renumbers every later
+   * minion. The pure layer has always kept these separate (WorldState.nextInsertionOrder for impacts, waves.nextOrder for
+   * the schedule); the scene did not.
+   */
+  private impactInsertionOrder = 0;
+
   // Wave scheduling.
   private spawnedWaves = 0;
   /** Inhibitors down per side, for super-minion spawning. */
@@ -829,6 +858,7 @@ export default class BattleScene extends Phaser.Scene {
     this.pendingImpacts = [];
     this.pendingWaveSpawns = [];
     this.authorityInsertionOrder = 0;
+    this.impactInsertionOrder = 0;
     this.spawnedWaves = 0;
     this.inhibitorKillTimes.clear();
     this.moveTarget = null;
@@ -2918,117 +2948,128 @@ export default class BattleScene extends Phaser.Scene {
     audio.playChampionCue(champion.id, slot, this.audioOptionsFor(origin));
     this.castFlare(caster, color, slot === 'R');
 
-    if (effect.dashes) {
-      caster.unit.pos.x = endpoint.x;
-      caster.unit.pos.y = endpoint.y;
-      if (champion.id === 'nightveil') this.passives = openDashWindow(this.passives, caster.unit.id, this.elapsed + 3);
-      this.drawDashTrail(origin, caster.unit.pos, color);
-    }
-    const alliesInRange = this.champions
-      .filter(
-        (ally) => ally.unit.team === caster.unit.team && isChampionPresent(ally.life!) &&
-          distance(ally.unit.pos, caster.unit.pos) <= ability.range,
-      )
-      .sort(
-        (a, b) => a.unit.hp / a.unit.maxHp - b.unit.hp / b.unit.maxHp || a.unit.id.localeCompare(b.unit.id),
-      );
-    if ((champion.id === 'dawnsong' || champion.id === 'wardlight') && slot === 'W') {
-      const target = aimedAlly;
-      if (!target) return;
-      const healed = applyHeal(target.unit, (ability.mechanics?.healing ?? 180) + (caster.abilityPower ?? 0) * (ability.mechanics?.apRatio ?? 0.4));
-      this.floatingDamage(target.unit.pos, healed, 0x3ad16a, '+');
-      effect = { ...effect, heal: 0 };
-    } else if (champion.id === 'dawnsong' && slot === 'R') {
-      for (const ally of alliesInRange) {
-        applyHeal(ally.unit, (ability.mechanics?.healing ?? 180) + (caster.abilityPower ?? 0) * (ability.mechanics?.apRatio ?? 0.4));
-        applyArmor(ally.effects, `dawnsong-R:${caster.unit.id}`, ability.mechanics?.armor ?? 20, this.elapsed + (ability.mechanics?.duration ?? 4));
-      }
-      effect = { ...effect, heal: 0 };
-    }
-    if (champion.id === 'dawnsong' && slot === 'E') {
-      const target = aimedAlly;
-      if (!target) return;
-      applyShield(target.effects, `dawnsong-E:${caster.unit.id}`, ability.mechanics?.shield ?? 140, this.elapsed + (ability.mechanics?.duration ?? 3));
-    } else if (champion.id === 'wardlight' && slot === 'R') {
-      for (const ally of alliesInRange) {
-        applyShield(ally.effects, `wardlight-R:${caster.unit.id}`, ability.mechanics?.shield ?? 160, this.elapsed + (ability.mechanics?.duration ?? 4));
-        applyMovementBuff(ally.effects, `wardlight-R:${caster.unit.id}`, ability.mechanics?.movementPercent ?? 0.15, this.elapsed + (ability.mechanics?.duration ?? 4));
-      }
-    } else if (champion.id === 'thornwarden' && slot === 'W') {
-      applyArmor(caster.effects, `thornwarden-W:${caster.unit.id}`, ability.mechanics?.armor ?? 30, this.elapsed + (ability.mechanics?.duration ?? 3));
-      cleanseSlows(caster.effects);
-    }
+    /**
+     * From here the DECISION is the pure plan's, and this method only performs it.
+     *
+     * What used to live here was nine `champion.id ===` checks across seven (champion, slot) pairs, interleaved with a
+     * pose, a flare, two floating numbers, two pulses and three draw calls. Only the effects have to agree between peers;
+     * a colour does not. So the effects moved to rift/abilityEffects.ts and the drawing stayed.
+     */
+    const plan = planCast({
+      championId: champion.id,
+      slot,
+      ability,
+      effect,
+      caster: castActorFor(caster),
+      everyone: this.champions.map(castActorFor),
+      origin,
+      endpoint,
+      aimedAllyId: aimedAlly?.unit.id ?? null,
+      executeTargetId: executeTarget?.id ?? null,
+      now: this.elapsed,
+      hasChronoCore: (caster === this.player ? this.ownedItems : caster.bot?.ownedItems ?? []).includes('chronoCore'),
+    });
 
-    if (effect.heal > 0) {
-      const healed = applyHeal(caster.unit, effect.heal);
-      this.floatingDamage(caster.unit.pos, healed, 0x3ad16a, '+');
-      this.pulse(caster.container, 0x3ad16a);
-    }
-    if (effect.buffDuration > 0 && effect.damage === 0 && effect.heal === 0) {
-      if (champion.id === 'nightveil' && slot === 'W') {
-        this.internalCooldowns.set(`nightveil-smoke:${caster.unit.id}`, this.elapsed + 3);
-      }
-      if (champion.id === 'ironhold' && slot === 'W') {
-        applyShield(caster.effects, 'ironhold-W', caster.unit.maxHp * 0.12, this.elapsed + 3);
-      }
-      this.pulse(caster.container, color);
-    }
+    // A refusal is an ally-targeted ability with nobody aimed. It must not draw, and it must not have spent a cooldown —
+    // the original expressed this as a bare `return` in the middle of the method, which is easy to miss and easy to break.
+    if (plan.refused) return;
 
-    if (champion.id === 'duskarrow' && slot === 'W') {
-      this.traps.push({
-        id: `trap-${caster.unit.id}-${this.authorityInsertionOrder++}`,
-        source: { ...caster.unit, pos: { ...origin } },
-        point: { ...endpoint },
-        radius: (ability.mechanics?.radius ?? 90),
-        rawDamage: abilityDamage(ability.damage, caster.abilityPower ?? 0),
-        color,
-        expiresAt: this.elapsed + (ability.mechanics?.trapDuration ?? 4),
-        slowPercent: ability.mechanics?.slowPercent ?? 0.3,
-        slowDuration: ability.mechanics?.duration ?? 2,
-      });
-      return;
-    }
-
-    if (effect.damage > 0) {
-      const itemIds = caster === this.player ? this.ownedItems : caster.bot?.ownedItems ?? [];
-      const hitRadius = effect.area ? (ability.mechanics?.radius ?? effect.radius) : effect.dashes ? 40 : 34;
-      const damage = abilityDamage(effect.damage, caster.abilityPower ?? 0);
-      const dueAt = effect.dashes
-        ? this.elapsed
-        : projectileImpactTime(this.elapsed, origin, endpoint, SKILLSHOT_PROJECTILE_SPEED);
-      if (effect.area) this.drawAoe(endpoint, hitRadius, color);
-      else if (!effect.dashes) {
-        this.drawProjectile(origin, endpoint, color, Math.max(1, (dueAt - this.elapsed) * 1000));
+    for (const op of plan.ops) {
+      const target = op.kind === 'dash' || op.kind === 'openDashWindow' || op.kind === 'smokeWindow' || op.kind === 'trap' || op.kind === 'damage'
+        ? caster
+        : this.champions.find((c) => c.unit.id === op.targetId) ?? caster;
+      switch (op.kind) {
+        case 'dash':
+          caster.unit.pos.x = op.to.x;
+          caster.unit.pos.y = op.to.y;
+          this.drawDashTrail(origin, caster.unit.pos, color);
+          break;
+        case 'openDashWindow':
+          this.passives = openDashWindow(this.passives, op.casterId, op.until);
+          break;
+        case 'smokeWindow':
+          this.internalCooldowns.set(`nightveil-smoke:${op.casterId}`, op.until);
+          break;
+        case 'heal': {
+          const healed = applyHeal(target.unit, op.amount);
+          this.floatingDamage(target.unit.pos, healed, 0x3ad16a, '+');
+          if (target === caster) this.pulse(caster.container, 0x3ad16a);
+          break;
+        }
+        case 'shield':
+          applyShield(target.effects, op.key, op.amount, op.expiresAt);
+          break;
+        case 'armor':
+          applyArmor(target.effects, op.key, op.amount, op.expiresAt);
+          break;
+        case 'movementBuff':
+          applyMovementBuff(target.effects, op.key, op.percent, op.expiresAt);
+          break;
+        case 'cleanseSlows':
+          cleanseSlows(target.effects);
+          break;
+        case 'trap':
+          this.traps.push({
+            /**
+             * Id derived from the caster and the ARM TIME, through the same rule the pure step uses.
+             *
+             * It used to be `trap-${id}-${this.authorityInsertionOrder++}` — and that counter is also the wave
+             * scheduler's `nextOrder`, from which minion identity is derived. So arming a trap shifted the insertion
+             * order the next minion would receive, making minion ids depend on how many abilities had been cast. On a
+             * replay where a cast lands differently, every later minion id moves.
+             */
+            id: trapIdFor(caster.unit.id, this.elapsed),
+            source: { ...caster.unit, pos: { ...origin } },
+            point: { ...op.point },
+            radius: op.radius,
+            rawDamage: op.rawDamage,
+            color,
+            expiresAt: op.expiresAt,
+            slowPercent: op.slowPercent,
+            slowDuration: op.slowDuration,
+          });
+          break;
+        case 'damage': {
+          const dueAt = op.dashes
+            ? this.elapsed
+            : projectileImpactTime(this.elapsed, op.origin, op.endpoint, SKILLSHOT_PROJECTILE_SPEED);
+          if (op.area) this.drawAoe(op.endpoint, op.radius, color);
+          else if (!op.dashes) {
+            this.drawProjectile(op.origin, op.endpoint, color, Math.max(1, (dueAt - this.elapsed) * 1000));
+          }
+          this.pendingImpacts.push({
+            dueAt,
+            // The impact queue's OWN counter. Separated from the wave scheduler's in this commit: they are two different
+            // monotonic sequences and sharing one made each depend on the other's traffic.
+            insertionOrder: this.impactInsertionOrder++,
+            source: { ...caster.unit, pos: { ...op.origin } },
+            ...(op.targetId
+              ? { targetId: op.targetId }
+              : op.lineWidth
+                ? {
+                    line: {
+                      origin: { ...op.origin },
+                      endpoint: { ...op.endpoint },
+                      halfWidth: op.lineWidth,
+                      subsequentDamageMultiplier: op.piercingDamageMultiplier ?? 1,
+                    },
+                  }
+                : { point: { ...op.endpoint } }),
+            radius: op.radius,
+            rawDamage: op.rawDamage,
+            color,
+            stunDuration: op.stunDuration,
+            slowPercent: op.slowPercent,
+            slowDuration: op.slowDuration,
+            pullDuration: op.pullDuration,
+            ability: true,
+            ultimate: op.ultimate,
+            singleTarget: op.targetId ? true : op.lineWidth ? false : !op.area,
+            chronoProc: (caster === this.player ? this.ownedItems : caster.bot?.ownedItems ?? []).includes('chronoCore'),
+          });
+          break;
+        }
       }
-
-      this.pendingImpacts.push({
-        dueAt,
-        insertionOrder: this.authorityInsertionOrder++,
-        source: { ...caster.unit, pos: { ...origin } },
-        ...(executeTarget
-          ? { targetId: executeTarget.id }
-          : ability.mechanics?.lineWidth
-            ? {
-                line: {
-                  origin: { ...origin },
-                  endpoint: { ...endpoint },
-                  halfWidth: ability.mechanics.lineWidth,
-                  subsequentDamageMultiplier: ability.mechanics.piercingDamageMultiplier ?? 1,
-                },
-              }
-            : { point: { ...endpoint } }),
-        radius: hitRadius,
-        rawDamage: damage,
-        color,
-        stunDuration: effect.stunDuration,
-        slowPercent: ability.mechanics?.slowPercent,
-        slowDuration: ability.mechanics?.duration,
-        pullDuration: ability.mechanics?.pullDuration,
-        ability: true,
-        ultimate: slot === 'R',
-        singleTarget: executeTarget ? true : ability.mechanics?.lineWidth ? false : !effect.area,
-        chronoProc: itemIds.includes('chronoCore'),
-      });
     }
   }
 
@@ -3367,7 +3408,7 @@ export default class BattleScene extends Phaser.Scene {
     const dueAt = projectileImpactTime(this.elapsed, source.unit.pos, target.pos, speed);
     this.pendingImpacts.push({
       dueAt,
-      insertionOrder: this.authorityInsertionOrder++,
+      insertionOrder: this.impactInsertionOrder++,
       source: { ...source.unit, pos: { ...source.unit.pos } },
       targetId: target.id,
       radius: 0,
