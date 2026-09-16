@@ -478,6 +478,7 @@ describe('cloneWorldState', () => {
         moveGoals: {},
         lanePush: {},
         effects: {},
+        traps: [],
       });
     });
 
@@ -595,6 +596,7 @@ describe('cloneWorldState', () => {
         'targets',
         'teamFacts',
         'tick',
+        'traps',
         'wardenCharges',
         'waves',
       ]);
@@ -605,7 +607,6 @@ describe('cloneWorldState', () => {
         'minions',
         'objectives',
         'structures',
-        'traps',
         'units',
       ]);
     });

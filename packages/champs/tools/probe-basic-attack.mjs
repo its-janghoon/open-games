@@ -137,6 +137,8 @@ async function main() {
         minions: bodies.filter(b => b.kind === 'minion').map(b => ({ id: b.id, hp: b.hp, cd: b.attackCdRemaining })),
         champions: bodies.filter(b => b.kind === 'champion').map(b => ({ id: b.id, hp: b.hp, maxHp: b.maxHp, cd: b.attackCdRemaining })),
         counts: bodies.reduce((a, b) => ({ ...a, [b.kind]: (a[b.kind] ?? 0) + 1 }), {}),
+        // Sampled so "a trap was armed during this run" is a measurement rather than a hope.
+        trapsLive: c.traps().length,
       };
     })()`);
 
@@ -157,6 +159,7 @@ async function main() {
     console.log(JSON.stringify({
       elapsedSeconds: Number((last.tick - first.tick).toFixed(2)),
       counts: last.counts,
+      trapsLive: { first: first.trapsLive, last: last.trapsLive },
       structuresDamaged: hurtStructures.map((s) => s.id),
       minionTookDamage: minionDamage,
       swingTimersMoving,

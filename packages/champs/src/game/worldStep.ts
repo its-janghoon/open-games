@@ -421,7 +421,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     ),
     minions: cloneMinions(state.minions),
     autoAttackers: cloneAutoAttackers(state.autoAttackers),
-    traps: cloneTraps(state.traps),
     camps: cloneCampSpawns(state.camps),
     campMembers: cloneCampMembers(state.campMembers),
     objectives: cloneObjectives(state.objectives),
@@ -479,6 +478,7 @@ export type AdoptedWorld = Pick<
   | 'moveGoals'
   | 'lanePush'
   | 'effects'
+  | 'traps'
 >;
 
 /** The adopted slice at match start. */
@@ -506,6 +506,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     moveGoals: {},
     lanePush: {},
     effects: {},
+    traps: [],
   };
 }
 
@@ -559,6 +560,7 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     effects: Object.fromEntries(
       Object.entries(world.effects).map(([id, fx]) => [id, cloneEffectState(fx)]),
     ),
+    traps: cloneTraps(world.traps),
   };
 }
 

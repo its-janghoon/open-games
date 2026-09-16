@@ -178,7 +178,7 @@ import { planBasicAttack } from '../rift/basicAttack';
 import { planWardenSpend, wardenTargetOrder } from '../rift/wardenSpend';
 import { planCast, type CastActor } from '../rift/abilityEffects';
 import { advanceBaron, advanceBuffs, advanceWardenCharges } from '../rift/fieldState';
-import { resolveTraps, trapIdFor } from '../rift/traps';
+import { resolveTraps, trapIdFor, type TrapState } from '../rift/traps';
 import {
   CHRONO_PROC_SECONDS,
   resolveImpactHits,
@@ -569,16 +569,26 @@ interface CampRuntime {
   nextSpawnAt: number;
 }
 
-interface TrapRuntime {
-  id: string;
-  source: Unit;
-  point: Vec2;
-  radius: number;
-  rawDamage: number;
+/**
+ * What the damage path actually reads off a source.
+ *
+ * `canDamageTarget` reads `team`; `applyTargetedDamage` reads `id` (to find the source entity for champion procs and to
+ * key effects) and `pos` (as a pull destination). Nothing reads its health, damage or stats. Narrowing the parameter to
+ * those three fields is what lets a trap stop carrying a full `Unit` clone of its caster -- see the trap store below.
+ */
+type DamageSource = Pick<Unit, 'id' | 'team' | 'pos'>;
+
+/**
+ * A trap's PRESENTATION, beside the state in `world.traps`.
+ *
+ * `color` is a draw colour and belongs nowhere near a snapshot. `armOrigin` is the caster's position when the trap was
+ * armed, which is NOT the trap's own point -- a trap can be thrown. It reaches the damage path only as a pull
+ * destination, and no trap ability applies a pull today, so it is not authority yet. If one ever does, this field has to
+ * move into `TrapState` rather than stay here.
+ */
+interface TrapVisual {
   color: number;
-  expiresAt: number;
-  slowPercent: number;
-  slowDuration: number;
+  armOrigin: Vec2;
 }
 
 interface ScheduledBattleCommand extends QueuedBattleCommand {
@@ -718,7 +728,12 @@ export default class BattleScene extends Phaser.Scene {
    */
 
   private camps: CampRuntime[] = [];
-  private traps: TrapRuntime[] = [];
+  /**
+   * Draw colour and arm origin per live trap. The trap STATE is `world.traps`.
+   *
+   * Entries are pruned alongside the markers in {@link syncTrapVisuals}, so this cannot outlive the state it decorates.
+   */
+  private trapVisuals = new Map<string, TrapVisual>();
   private trapGraphics = new Map<string, Phaser.GameObjects.Arc>();
 
   /**
@@ -886,9 +901,9 @@ export default class BattleScene extends Phaser.Scene {
     this.camps = this.mode === 'conquest'
       ? CAMPS.map((camp) => ({ camp, members: [], nextSpawnAt: 0 }))
       : [];
-    this.traps = [];
     for (const marker of this.trapGraphics.values()) marker.destroy();
     this.trapGraphics.clear();
+    this.trapVisuals.clear();
     this.world.pendingImpacts = [];
     this.world.waves.pending = [];
     this.world.waves.nextOrder = 0;
@@ -1021,7 +1036,7 @@ export default class BattleScene extends Phaser.Scene {
       structureHp: () => this.allEntities
         .filter((e) => e.unit.kind === 'turret' || e.unit.kind === 'nexus')
         .map((e) => ({ id: e.unit.id, hp: Math.round(e.unit.hp) })),
-      traps: () => this.traps.map((t) => ({ id: t.id, expiresAt: t.expiresAt, radius: t.radius })),
+      traps: () => this.world.traps.map((t) => ({ id: t.id, expiresAt: t.expiresAt, radius: t.radius })),
     };
   }
 
@@ -1829,8 +1844,8 @@ export default class BattleScene extends Phaser.Scene {
       this.aimPreview = undefined;
       for (const marker of this.trapGraphics.values()) marker.destroy();
       this.trapGraphics.clear();
-      this.traps = [];
-      this.scheduledCommands = [];
+    this.trapVisuals.clear();
+        this.scheduledCommands = [];
       this.world.waves.pending = [];
       this.world.pendingImpacts = [];
       this.criticalTextureReadiness = [];
@@ -3251,7 +3266,7 @@ export default class BattleScene extends Phaser.Scene {
           cleanseSlows(this.effectsFor(target));
           break;
         case 'trap':
-          this.traps.push({
+          this.world.traps.push({
             /**
              * Id derived from the caster and the ARM TIME, through the same rule the pure step uses.
              *
@@ -3261,14 +3276,18 @@ export default class BattleScene extends Phaser.Scene {
              * replay where a cast lands differently, every later minion id moves.
              */
             id: trapIdFor(caster.unit.id, this.world.simTime),
-            source: { ...caster.unit, pos: { ...origin } },
+            sourceId: caster.unit.id,
+            sourceTeam: caster.unit.team,
             point: { ...op.point },
             radius: op.radius,
             rawDamage: op.rawDamage,
-            color,
             expiresAt: op.expiresAt,
             slowPercent: op.slowPercent,
             slowDuration: op.slowDuration,
+          });
+          this.trapVisuals.set(trapIdFor(caster.unit.id, this.world.simTime), {
+            color,
+            armOrigin: { ...origin },
           });
           break;
         case 'damage': {
@@ -3476,32 +3495,27 @@ export default class BattleScene extends Phaser.Scene {
    * something to leave standing.
    */
   private tickTraps(): void {
-    if (this.traps.length === 0) return;
-    const byId = new Map(this.traps.map((trap) => [trap.id, trap]));
+    if (this.world.traps.length === 0) return;
+    const byId = new Map(this.world.traps.map((trap) => [trap.id, trap]));
     const bodies = this.allEntities.filter(
       (candidate) => candidate.unit.kind !== 'turret' && candidate.unit.kind !== 'nexus',
     );
     const entityById = new Map(bodies.map((e) => [e.unit.id, e]));
 
+    /**
+     * The store is already the pure shape, so there is no conversion here any more.
+     *
+     * It used to rebuild a `TrapState[]` from the runtime list on every tick — the same assemble-and-disassemble pattern
+     * the wave schedule and the gold state had, and the same signal that the data wanted to live in the world.
+     */
     const result = resolveTraps(
-      this.traps.map((trap) => ({
-        id: trap.id,
-        sourceId: trap.source.id,
-        sourceTeam: trap.source.team,
-        point: trap.point,
-        radius: trap.radius,
-        rawDamage: trap.rawDamage,
-        expiresAt: trap.expiresAt,
-        slowPercent: trap.slowPercent,
-        slowDuration: trap.slowDuration,
-      })),
+      this.world.traps,
       bodies.map((e) => ({ id: e.unit.id, pos: e.unit.pos })),
       this.world.simTime,
       // Judged per TRAP, using that trap's own source — which is why the step takes a callback rather than a flag.
       (trapState, candidate) => {
-        const trap = byId.get(trapState.id);
         const entity = entityById.get(candidate.id);
-        return Boolean(trap && entity && this.canDamageTarget(trap.source, entity));
+        return Boolean(entity && this.canDamageTarget(this.trapSource(trapState), entity));
       },
     );
 
@@ -3509,28 +3523,50 @@ export default class BattleScene extends Phaser.Scene {
       const trap = byId.get(trigger.trapId);
       const target = entityById.get(trigger.targetId);
       if (!trap || !target) continue;
-      this.applyTargetedDamage(trap.source, target, trigger.rawDamage, trap.color, {
-        ability: true,
-        slowPercent: trigger.slowPercent,
-        slowDuration: trigger.slowDuration,
-      });
+      this.applyTargetedDamage(
+        this.trapSource(trap),
+        target,
+        trigger.rawDamage,
+        this.trapVisuals.get(trap.id)?.color ?? 0xffffff,
+        { ability: true, slowPercent: trigger.slowPercent, slowDuration: trigger.slowDuration },
+      );
     }
-    this.traps = result.traps.map((survivor) => byId.get(survivor.id)).filter((t): t is TrapRuntime => Boolean(t));
+    this.world.traps = result.traps;
+  }
+
+  /**
+   * The damage source for a trap, built from its state rather than kept as a frozen `Unit` copy.
+   *
+   * The runtime list used to hold `{ ...caster.unit, pos: origin }` per trap — a full clone of a mutable object, for the
+   * three fields the damage path reads. `pos` is the ARM ORIGIN and not the trap's own point, because a trap can be
+   * thrown; it survives in `trapVisuals` for that reason, and falls back to the trap's point if the visual is gone.
+   */
+  private trapSource(trap: TrapState): DamageSource {
+    return {
+      id: trap.sourceId,
+      team: trap.sourceTeam,
+      pos: this.trapVisuals.get(trap.id)?.armOrigin ?? trap.point,
+    };
   }
 
   private syncTrapVisuals(): void {
-    const activeIds = new Set(this.traps.map((trap) => trap.id));
+    const activeIds = new Set(this.world.traps.map((trap) => trap.id));
     for (const [id, marker] of this.trapGraphics) {
       if (activeIds.has(id)) continue;
       marker.destroy();
       this.trapGraphics.delete(id);
     }
-    for (const trap of this.traps) {
+    // Presentation is pruned with the markers, so it cannot outlive the state it decorates.
+    for (const id of [...this.trapVisuals.keys()]) {
+      if (!activeIds.has(id)) this.trapVisuals.delete(id);
+    }
+    for (const trap of this.world.traps) {
       const point = project(trap.point);
+      const color = this.trapVisuals.get(trap.id)?.color ?? 0xffffff;
       let marker = this.trapGraphics.get(trap.id);
       if (!marker) {
-        marker = this.add.circle(point.x, point.y, Math.max(8, trap.radius), trap.color, 0.16)
-          .setStrokeStyle(2, trap.color, 0.9)
+        marker = this.add.circle(point.x, point.y, Math.max(8, trap.radius), color, 0.16)
+          .setStrokeStyle(2, color, 0.9)
           .setDepth(VFX_DEPTH - 2);
         this.trapGraphics.set(trap.id, marker);
       }
@@ -3747,7 +3783,7 @@ export default class BattleScene extends Phaser.Scene {
     }
   }
 
-  private canDamageTarget(source: Unit, target: Entity): boolean {
+  private canDamageTarget(source: DamageSource, target: Entity): boolean {
     if (!areHostile(source.team, target.unit.team) || !this.isEntityDamageable(target)) return false;
     if (target.unit.kind !== 'turret' && target.unit.kind !== 'nexus') return true;
     const livingIds = new Set(
@@ -3763,7 +3799,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private applyTargetedDamage(
-    source: Entity | Unit,
+    source: Entity | DamageSource,
     target: Entity,
     rawDamage: number,
     color: number,
@@ -3866,7 +3902,7 @@ export default class BattleScene extends Phaser.Scene {
     }
   }
 
-  private registerKill(source: Unit, target: Unit, lethal: boolean) {
+  private registerKill(source: DamageSource, target: Unit, lethal: boolean) {
     if (!lethal) return;
     const targetEntity = this.entityForUnit(target);
     const sourceEntity = this.entityForUnit(source);
@@ -4294,7 +4330,7 @@ export default class BattleScene extends Phaser.Scene {
     amount: number,
     color: number,
     lethal: boolean,
-    opts: { fromPos?: Vec2; ability?: boolean; ult?: boolean; attacker?: Unit } = {},
+    opts: { fromPos?: Vec2; ability?: boolean; ult?: boolean; attacker?: DamageSource } = {},
   ) {
     const fraction = target ? amount / target.unit.maxHp : 0;
     const importance = classifyHit({ fraction, ability: opts.ability, ult: opts.ult, lethal });
@@ -4508,7 +4544,7 @@ export default class BattleScene extends Phaser.Scene {
     });
   }
 
-  private entityForUnit(unit: Unit): Entity | undefined {
+  private entityForUnit(unit: Pick<Unit, 'id'>): Entity | undefined {
     return this.entityById.get(unit.id);
   }
 
