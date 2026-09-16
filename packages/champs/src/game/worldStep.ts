@@ -407,16 +407,6 @@ export function cloneWorldState(state: WorldState): WorldState {
     effects: Object.fromEntries(
       Object.entries(state.effects).map(([id, fx]) => [id, cloneEffectState(fx)]),
     ),
-    /**
-     * Copied, even though advanceChampionLife never mutates and returns the same object
-     * when nothing changed - so sharing the reference would be safe today. It is copied
-     * anyway because this function's promise is a fully independent copy, and honouring
-     * that promise must not depend on an immutability convention maintained in another
-     * file. Four scalar fields is not a cost worth trading a silent hazard for.
-     */
-    lives: Object.fromEntries(
-      Object.entries(state.lives).map(([id, life]) => [id, { ...life }]),
-    ),
     structures: Object.fromEntries(
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
@@ -479,6 +469,7 @@ export type AdoptedWorld = Pick<
   | 'economy'
   | 'progression'
   | 'buffs'
+  | 'lives'
 >;
 
 /** The adopted slice at match start. */
@@ -502,6 +493,7 @@ export function createAdoptedWorld(): AdoptedWorld {
     economy: {},
     progression: {},
     buffs: {},
+    lives: {},
   };
 }
 
@@ -540,6 +532,14 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
       Object.entries(world.progression).map(([id, level]) => [id, { ...level }]),
     ),
     buffs: cloneBuffs(world.buffs),
+    /**
+     * Copied, even though advanceChampionLife never mutates and returns the same object when nothing changed — so sharing
+     * the reference would be safe today. It is copied anyway because this function's promise is a fully independent copy,
+     * and honouring that promise must not depend on an immutability convention maintained in another file.
+     */
+    lives: Object.fromEntries(
+      Object.entries(world.lives).map(([id, life]) => [id, { ...life }]),
+    ),
   };
 }
 
