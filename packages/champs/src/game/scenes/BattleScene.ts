@@ -15,7 +15,6 @@ import {
   partitionImpacts,
   persistentEnemy,
   projectileImpactTime,
-  type PendingImpact,
   resetAttackCooldown,
   resolveAbility,
   startCooldown,
@@ -547,13 +546,12 @@ interface Entity {
 }
 
 
-interface PendingWaveSpawn {
-  dueAt: number;
-  insertionOrder: number;
-  type: MinionType;
-  team: MapSide;
-  lane: Lane;
-}
+/**
+ * The scene's own `PendingWaveSpawn` interface is gone with the field it typed.
+ *
+ * It duplicated rift/waveSchedule.ts's definition -- the same shape declared twice, which is how a scene copy and a pure
+ * copy drift a field apart. `world.waves.pending` is typed by the pure one now, so there is a single definition.
+ */
 
 interface ObjectiveRuntime {
   id: EpicMonster;
@@ -720,22 +718,23 @@ export default class BattleScene extends Phaser.Scene {
   private camps: CampRuntime[] = [];
   private traps: TrapRuntime[] = [];
   private trapGraphics = new Map<string, Phaser.GameObjects.Arc>();
-  private pendingImpacts: PendingImpact[] = [];
-  private pendingWaveSpawns: PendingWaveSpawn[] = [];
-  private authorityInsertionOrder = 0;
 
   /**
-   * The impact queue's monotonic counter now lives in `world.nextInsertionOrder`, separate from the wave scheduler's
-   * `authorityInsertionOrder` above.
+   * The impact queue is `world.pendingImpacts`; the wave schedule's three fields are `world.waves`.
+   *
+   * The scene was already assembling a `WaveSchedule` literal at every `scheduleDueWaves` call and taking it apart again
+   * afterwards, which is the shape telling you where it wanted to live. It now goes over whole.
+   */
+  /**
+   * The two monotonic counters are `world.nextInsertionOrder` (impacts) and `world.waves.nextOrder` (the schedule), and
+   * they stay separate.
    *
    * They were one field. The wave scheduler derives MINION IDENTITY from its order, so every queued impact and every armed
    * trap shifted the id the next minion would get — a replay in which a cast lands differently renumbers every later
-   * minion. The pure layer has always kept these separate (WorldState.nextInsertionOrder for impacts, waves.nextOrder for
-   * the schedule); the scene did not, and now it does with the counter in the snapshot where a rewind can restore it.
+   * minion. The pure layer has always kept these separate; the scene did not, and now both sit in the snapshot where a
+   * rewind can restore them.
    */
 
-  // Wave scheduling.
-  private spawnedWaves = 0;
   /** Inhibitors down per side, for super-minion spawning. */
   /**
    * When each inhibitor was destroyed, as a RECORD rather than a Map.
@@ -883,10 +882,10 @@ export default class BattleScene extends Phaser.Scene {
     this.traps = [];
     for (const marker of this.trapGraphics.values()) marker.destroy();
     this.trapGraphics.clear();
-    this.pendingImpacts = [];
-    this.pendingWaveSpawns = [];
-    this.authorityInsertionOrder = 0;
-    this.spawnedWaves = 0;
+    this.world.pendingImpacts = [];
+    this.world.waves.pending = [];
+    this.world.waves.nextOrder = 0;
+    this.world.waves.spawnedWaves = 0;
     this.inhibitorKillTimes = {};
     this.moveTarget = null;
     this.playerOrder = 'stop';
@@ -1835,8 +1834,8 @@ export default class BattleScene extends Phaser.Scene {
       this.trapGraphics.clear();
       this.traps = [];
       this.scheduledCommands = [];
-      this.pendingWaveSpawns = [];
-      this.pendingImpacts = [];
+      this.world.waves.pending = [];
+      this.world.pendingImpacts = [];
       this.criticalTextureReadiness = [];
     });
 
@@ -2346,26 +2345,21 @@ export default class BattleScene extends Phaser.Scene {
      * one place that a rollback can replay. The inhibitor kill times are handed over as plain data instead of the
      * scene's Map, because a Map is exactly what a snapshot cannot carry.
      */
-    const advanced = scheduleDueWaves(
-      {
-        spawnedWaves: this.spawnedWaves,
-        pending: this.pendingWaveSpawns,
-        nextOrder: this.authorityInsertionOrder,
-      },
+    // The schedule goes over whole, now that the scene stores it in WorldState's own shape rather than as three loose
+    // fields it had to reassemble at every call.
+    this.world.waves = scheduleDueWaves(
+      this.world.waves,
       this.world.simTime,
       this.lanes,
       { killedAt: this.inhibitorKillTimes },
       (now, killedAt) => isInhibitorAlive(now, killedAt, this.mode),
       this.mode,
     );
-    this.spawnedWaves = advanced.spawnedWaves;
-    this.pendingWaveSpawns = advanced.pending;
-    this.authorityInsertionOrder = advanced.nextOrder;
   }
 
   private processWaveSpawns() {
-    const partitioned = partitionImpacts(this.pendingWaveSpawns, this.world.simTime);
-    this.pendingWaveSpawns = partitioned.pending;
+    const partitioned = partitionImpacts(this.world.waves.pending, this.world.simTime);
+    this.world.waves.pending = partitioned.pending;
     const liveByBucket = new Map<string, number>();
     for (const minion of this.minions) {
       if (minion.unit.dead || !minion.rift) continue;
@@ -2379,7 +2373,7 @@ export default class BattleScene extends Phaser.Scene {
       // authoritative. Defer admission instead of deleting actors from the
       // simulation; the 15-minute hard cap bounds the retry queue naturally.
       if (live >= MAX_LIVE_MINIONS_PER_SIDE_LANE) {
-        this.pendingWaveSpawns.push({
+        this.world.waves.pending.push({
           ...spawn,
           dueAt: this.world.simTime + WAVE_SPAWN_RETRY_SECONDS,
         });
@@ -3108,7 +3102,7 @@ export default class BattleScene extends Phaser.Scene {
             /**
              * Id derived from the caster and the ARM TIME, through the same rule the pure step uses.
              *
-             * It used to be `trap-${id}-${this.authorityInsertionOrder++}` — and that counter is also the wave
+             * It used to be `trap-${id}-${this.world.waves.nextOrder++}` — and that counter is also the wave
              * scheduler's `nextOrder`, from which minion identity is derived. So arming a trap shifted the insertion
              * order the next minion would receive, making minion ids depend on how many abilities had been cast. On a
              * replay where a cast lands differently, every later minion id moves.
@@ -3132,7 +3126,7 @@ export default class BattleScene extends Phaser.Scene {
           else if (!op.dashes) {
             this.drawProjectile(op.origin, op.endpoint, color, Math.max(1, (dueAt - this.world.simTime) * 1000));
           }
-          this.pendingImpacts.push({
+          this.world.pendingImpacts.push({
             dueAt,
             // The impact queue's OWN counter. Separated from the wave scheduler's in this commit: they are two different
             // monotonic sequences and sharing one made each depend on the other's traffic.
@@ -3529,7 +3523,7 @@ export default class BattleScene extends Phaser.Scene {
     speed: number,
   ): number {
     const dueAt = projectileImpactTime(this.world.simTime, source.unit.pos, target.pos, speed);
-    this.pendingImpacts.push({
+    this.world.pendingImpacts.push({
       dueAt,
       insertionOrder: this.world.nextInsertionOrder++,
       source: { ...source.unit, pos: { ...source.unit.pos } },
@@ -3547,8 +3541,8 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private processPendingImpacts() {
-    const partitioned = partitionImpacts(this.pendingImpacts, this.world.simTime);
-    this.pendingImpacts = partitioned.pending;
+    const partitioned = partitionImpacts(this.world.pendingImpacts, this.world.simTime);
+    this.world.pendingImpacts = partitioned.pending;
     for (const impact of partitioned.due.sort((a, b) => a.dueAt - b.dueAt || a.insertionOrder - b.insertionOrder)) {
       const source = impact.source;
 
