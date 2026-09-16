@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-15",
+  "generated": "2026-09-16",
   "generatedBy": "scripts/gen-compliance.mjs",
   "howToReproduce": "npm run build — every claim below is a gate the build already runs.",
   "summary": {

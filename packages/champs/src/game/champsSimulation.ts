@@ -141,6 +141,9 @@ export function createChampsSimulation(
       outcome: ongoing(),
       // One turret per side, so the step is genuinely exercised without needing the scene's full structure graph.
       resources: Object.fromEntries(participants.map((id) => [id, initialResource(300)])),
+      traps: [],
+      camps: [],
+      campMembers: [],
       autoAttackers: [
         { id: 'allyTurret', team: 'ally', pos: { x: 160, y: 300 }, ad: 90, attackRange: 200, attackSpeed: 0.8, attackCdRemaining: 0, stunned: 0, dead: false },
         { id: 'enemyTurret', team: 'enemy', pos: { x: 440, y: 300 }, ad: 90, attackRange: 200, attackSpeed: 0.8, attackCdRemaining: 0, stunned: 0, dead: false },

@@ -13,6 +13,13 @@ import type { TargetTable } from './rift/minionCombat';
 import { clonePassiveState, type PassiveState } from './rift/passives';
 import { cloneAutoAttackers, type AutoAttacker } from './rift/autoAttack';
 import { cloneResources, type ResourceState } from './rift/resources';
+import { cloneTraps, type TrapState } from './rift/traps';
+import {
+  cloneCampMembers,
+  cloneCampSpawns,
+  type CampMemberState,
+  type CampSpawnState,
+} from './rift/campCombat';
 import {
   cloneTeamFacts,
   type MatchOutcome,
@@ -329,6 +336,11 @@ export interface WorldState {
    * function of a snapshot — but the state it READS was.
    */
   resources: Record<string, ResourceState>;
+  /** Armed ground traps. Absolute expiry, so a rewind needs no knowledge of how many ticks were undone. */
+  traps: TrapState[];
+  /** Jungle camps and their living members. The members were Phaser Entities, so a snapshot could not hold them at all. */
+  camps: CampSpawnState[];
+  campMembers: CampMemberState[];
 }
 
 /**
@@ -382,6 +394,9 @@ export function cloneWorldState(state: WorldState): WorldState {
     outcome: { ...state.outcome },
     autoAttackers: cloneAutoAttackers(state.autoAttackers),
     resources: cloneResources(state.resources),
+    traps: cloneTraps(state.traps),
+    camps: cloneCampSpawns(state.camps),
+    campMembers: cloneCampMembers(state.campMembers),
     moveGoals: Object.fromEntries(
       Object.entries(state.moveGoals).map(([id, goal]) => [id, goal ? { ...goal } : null]),
     ),

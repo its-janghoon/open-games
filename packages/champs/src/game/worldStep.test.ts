@@ -189,6 +189,33 @@ describe('cloneWorldState', () => {
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
     resources: { a: { current: 300, max: 300 } },
+    traps: [
+      {
+        id: 'trap:a:1.000',
+        sourceId: 'a',
+        sourceTeam: 'ally' as const,
+        point: { x: 500, y: 500 },
+        radius: 120,
+        rawDamage: 60,
+        expiresAt: 9,
+        slowPercent: 0.3,
+        slowDuration: 1,
+      },
+    ],
+    camps: [{ campId: 'gromp', center: { x: 800, y: 800 }, nextSpawnAt: 0 }],
+    campMembers: [
+      {
+        id: 'camp-gromp-a',
+        campId: 'gromp',
+        pos: { x: 800, y: 800 },
+        home: { x: 800, y: 800 },
+        hp: 400,
+        maxHp: 400,
+        attackRange: 160,
+        stunned: 0,
+        dead: false,
+      },
+    ],
     autoAttackers: [
       {
         id: 't1',
@@ -270,6 +297,14 @@ describe('cloneWorldState', () => {
     // passives: the FIFTH field to slip through this way. The pattern is now established well enough that a new
     // record field should be asserted here in the same commit that adds it, rather than after an injection finds it.
     // autoAttackers asserted in the SAME commit that adds it, which is now the standing rule for a new record field.
+    copy.traps[0].radius = -1;
+    copy.traps[0].point.x = -1;
+    copy.traps.push({ ...copy.traps[0], id: 'extra' });
+    copy.camps[0].nextSpawnAt = 999;
+    copy.camps[0].center.x = -1;
+    copy.campMembers[0].hp = 1;
+    copy.campMembers[0].pos.x = -1;
+    copy.campMembers[0].home.y = -1;
     copy.resources.a.current = 1;
     copy.resources.zz = { current: 5, max: 5 };
     copy.autoAttackers[0].attackCdRemaining = 99;
@@ -302,6 +337,14 @@ describe('cloneWorldState', () => {
     expect(original.structures.t1.hp).toBe(1200);
     expect(original.structures.t1.killedAt).toBeNull();
     expect(original.structures.zz).toBeUndefined();
+    expect(original.traps).toHaveLength(1);
+    expect(original.traps[0].radius).toBe(120);
+    expect(original.traps[0].point.x).toBe(500);
+    expect(original.camps[0].nextSpawnAt).toBe(0);
+    expect(original.camps[0].center.x).toBe(800);
+    expect(original.campMembers[0].hp).toBe(400);
+    expect(original.campMembers[0].pos.x).toBe(800);
+    expect(original.campMembers[0].home.y).toBe(800);
     expect(original.resources.a.current).toBe(300);
     expect(original.resources.zz).toBeUndefined();
     expect(original.autoAttackers).toHaveLength(1);
@@ -400,6 +443,9 @@ describe('advanceLives', () => {
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
     resources: {},
+    traps: [],
+    camps: [],
+    campMembers: [],
     autoAttackers: [],
     targets: {},
     minions: [],
@@ -489,6 +535,9 @@ describe('advanceEffects', () => {
     teamFacts: { ally: { championKills: 0, objectivePoints: 0 }, enemy: { championKills: 0, objectivePoints: 0 } },
     outcome: { kind: 'ongoing' },
     resources: {},
+    traps: [],
+    camps: [],
+    campMembers: [],
     autoAttackers: [],
     targets: {},
     minions: [],
