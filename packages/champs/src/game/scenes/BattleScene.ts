@@ -943,6 +943,15 @@ export default class BattleScene extends Phaser.Scene {
       // Who each auto-attacker has locked on to, so a probe can prove turrets are still deciding after the shared-rule
       // adoption — a passing unit suite cannot, since it does not drive this scene.
       locks: () => ({ ...this.autoAttackTargets }),
+      /**
+       * Submit a battle command straight into the scene's own funnel.
+       *
+       * Read-only observation is not enough for one specific check: duskarrow's W is an AIMED ability, and a synthetic
+       * PointerEvent arms it (`is-aiming` appears on the HUD) but never commits, because the commit path wants a real
+       * pointer interaction. Since processCommand is the single funnel every player order already passes through, driving
+       * it directly exercises exactly the same code the UI would, without simulating a mouse.
+       */
+      command: (command: BattleCommand) => this.processCommand(command),
       structureHp: () => this.allEntities
         .filter((e) => e.unit.kind === 'turret' || e.unit.kind === 'nexus')
         .map((e) => ({ id: e.unit.id, hp: Math.round(e.unit.hp) })),
