@@ -11,6 +11,9 @@ import { pruneTargets, resolveMinionCombat } from './rift/minionCombat';
 import { basicAttackBonus, createPassiveState, prunePassives } from './rift/passives';
 import { resolveAutoAttacks } from './rift/autoAttack';
 import { advanceResources, initialResource } from './rift/resources';
+import { advanceBaron, advanceBuffs, advanceWardenCharges } from './rift/fieldState';
+import { advanceCamps, campMemberIdFor, dueCamps } from './rift/campCombat';
+import { resolveTraps } from './rift/traps';
 import { noBaronBuff } from './rift/objectives';
 import {
   advanceRecalls,
@@ -88,7 +91,12 @@ export interface ChampsInput {
 export const IDLE_INPUT: ChampsInput = { moveTo: null };
 
 /** Seconds a shot spends in the air. Fixed, so a replay reproduces the same deadline. */
-export const SHOT_FLIGHT_SECONDS = 0.2;
+export /** Seeding stats for a headless camp monster. The scene uses CAMP_PACKS; these are not claimed to match it. */
+const CAMP_MEMBER_HP = 1200;
+const CAMP_MEMBER_AD = 24;
+const CAMP_MEMBER_ATTACK_RANGE = 160;
+
+const SHOT_FLIGHT_SECONDS = 0.2;
 
 /**
  * Champs' world as a rollback simulation.
@@ -235,6 +243,107 @@ export function createChampsSimulation(
       // the carry outside the snapshot's reach again.
       next.economy = advanceEconomy(next.economy, TICK_SECONDS);
       next.resources = advanceResources(next.resources, TICK_SECONDS);
+
+      /**
+       * Buffs, the tyrant buff and warden charges expire against the CLOCK, before anything reads them.
+       *
+       * Order matters here in a way it does not for most of these steps: blue buff feeds resource regeneration, so
+       * expiring after the regen would grant one extra tick of a buff that had already lapsed -- and on a replayed tick
+       * that extra grant lands or does not depending on where the boundary falls, which is a divergence.
+       */
+      next.buffs = advanceBuffs(next.buffs, next.simTime);
+      next.baron = advanceBaron(next.baron, next.simTime);
+      next.wardenCharges = advanceWardenCharges(next.wardenCharges, next.simTime);
+
+      // Jungle camps: repopulate a cleared camp whose deadline has passed, then advance whoever is standing.
+      for (const campId of dueCamps(next.camps, next.campMembers, next.simTime)) {
+        const camp = next.camps.find((c) => c.campId === campId);
+        if (!camp) continue;
+        next.campMembers = [
+          ...next.campMembers.filter((m) => m.campId !== campId),
+          {
+            id: campMemberIdFor(campId, 'a'),
+            campId,
+            pos: { ...camp.center },
+            home: { ...camp.center },
+            hp: CAMP_MEMBER_HP,
+            maxHp: CAMP_MEMBER_HP,
+            attackRange: CAMP_MEMBER_ATTACK_RANGE,
+            stunned: 0,
+            dead: false,
+          },
+        ];
+      }
+      const jungle = advanceCamps(
+        next.campMembers,
+        next.camps,
+        next.units
+          .filter((u) => !u.dead)
+          .map((u) => ({ id: u.id, pos: u.pos, attackable: u.team !== 'neutral' })),
+        TICK_SECONDS,
+      );
+      next.campMembers = jungle.members;
+      for (const action of jungle.actions) {
+        if (action.kind !== 'attack') continue;
+        const member = next.campMembers.find((m) => m.id === action.memberId);
+        const victim = next.units.find((u) => u.id === action.targetId);
+        if (!member || !victim) continue;
+        queueImpact(next, {
+          dueAt: next.simTime,
+          source: {
+            ...victim,
+            id: member.id,
+            team: 'neutral',
+            pos: { ...member.pos },
+            ad: CAMP_MEMBER_AD,
+          },
+          targetId: victim.id,
+          radius: 0,
+          rawDamage: CAMP_MEMBER_AD,
+          color: 0x9eb7c9,
+          stunDuration: 0,
+          ability: false,
+          ultimate: false,
+          singleTarget: true,
+          chronoProc: false,
+        });
+      }
+
+      /**
+       * Traps resolve AFTER movement has been applied for the tick, which is why this sits below the movement section
+       * rather than beside the other expiries: a trap catches whoever is standing on it now, not whoever was standing
+       * there before they moved. Damage goes through the impact queue like every other hit so ordering stays in one place.
+       */
+      const sprung = resolveTraps(
+        next.traps,
+        next.units
+          .filter((u) => !u.dead)
+          .map((u) => ({ id: u.id, pos: u.pos, damageable: true })),
+        next.simTime,
+      );
+      next.traps = sprung.traps;
+      for (const trigger of sprung.triggers) {
+        const owner = next.units.find((u) => u.id === trigger.sourceId);
+        const victim = next.units.find((u) => u.id === trigger.targetId);
+        if (!owner || !victim) continue;
+        queueImpact(next, {
+          dueAt: next.simTime,
+          source: { ...owner, pos: { ...owner.pos } },
+          targetId: victim.id,
+          radius: 0,
+          rawDamage: trigger.rawDamage,
+          color: 0x7a5cc4,
+          stunDuration: 0,
+          slowPercent: trigger.slowPercent,
+          slowDuration: trigger.slowDuration,
+          // A trap is an ability, so it must be flagged as one: shields and reductions that only apply to ability damage
+          // would otherwise treat it as a basic attack.
+          ability: true,
+          ultimate: false,
+          singleTarget: true,
+          chronoProc: false,
+        });
+      }
       // Revive runs against the clock AFTER it has advanced, so a structure whose respawn time falls on this tick is
       // back before anything reads it. The deadline is absolute, so a replayed tick reaches the same verdict.
       next.structures = reviveStructures(next.structures, next.simTime);

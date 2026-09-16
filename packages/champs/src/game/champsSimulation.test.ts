@@ -585,3 +585,141 @@ describe('champs world under rollback', () => {
     expect(stale.rejection).toBe('too-old');
   });
 });
+
+describe('the six subsystems added last, under rollback', () => {
+  /**
+   * These were in the snapshot and CLONED, but nothing STEPPED them — so a rollback restored state that never changed and
+   * every equality assertion passed for the wrong reason. State that is copied but never advanced is worse than state left
+   * out, because it looks covered.
+   *
+   * The scenario deliberately makes each one do something before the rewind: a camp spawns and attacks, a trap is armed
+   * and sprung, a buff lapses, the tyrant buff lapses, and a warden charge lapses.
+   */
+  function seeded() {
+    const sim = createChampsSimulation(PARTICIPANTS);
+    const base = sim.initial;
+    sim.initial = () => {
+      const state = base();
+      return {
+        ...state,
+        camps: [
+          { campId: 'gromp', center: { x: 320, y: 300 }, nextSpawnAt: 0 },
+          { campId: 'wolves', center: { x: 2000, y: 2000 }, nextSpawnAt: 9999 },
+        ],
+        /**
+         * A member that is DAMAGED and AWAY from home, so advancing it has an observable effect.
+         *
+         * Without this the only monsters are the ones the repopulate loop creates, at full health standing on their home
+         * spot — for which advanceCamps decides 'hold' and heals nothing, because healing is capped at max. Dropping the
+         * advance entirely then changed no assertion, so the step was untested while looking covered. Same hole as
+         * gridfall's nextShotSeq and ringout's IK clamp: a guard whose scenario never reaches the state that matters.
+         */
+        campMembers: [
+          {
+            id: 'camp-wolves-a',
+            campId: 'wolves',
+            pos: { x: 2300, y: 2000 },
+            home: { x: 2000, y: 2000 },
+            hp: 100,
+            maxHp: 1200,
+            attackRange: 160,
+            stunned: 0,
+            dead: false,
+          },
+        ],
+        traps: [
+          {
+            id: 'trap:p1:0.000',
+            sourceId: 'p1',
+            sourceTeam: 'ally' as const,
+            point: { x: 300, y: 300 },
+            radius: 400,
+            rawDamage: 40,
+            expiresAt: 0.5,
+            slowPercent: 0.3,
+            slowDuration: 1,
+          },
+        ],
+        buffs: {
+          p1: { buffs: [{ kind: 'blue' as const, expiresAt: 0.2 }] },
+          p2: { buffs: [{ kind: 'red' as const, expiresAt: 999 }] },
+        },
+        wardenCharges: { ally: { acquiredAt: 0, expiresAt: 0.3 }, enemy: null },
+      };
+    };
+    return sim;
+  }
+
+  it('actually advances all six, rather than carrying them unchanged', () => {
+    const sim = seeded();
+    let state = sim.initial();
+    const before = {
+      campMembers: state.campMembers.length,
+      traps: state.traps.length,
+      p1Buffs: state.buffs.p1.buffs.length,
+      warden: state.wardenCharges.ally,
+    };
+    for (let tick = 0; tick < 60; tick += 1) {
+      state = sim.step(state, new Map(), tick);
+    }
+    expect(before.campMembers, 'starts with the one seeded monster').toBe(1);
+    const wolf = state.campMembers.find((m) => m.id === 'camp-wolves-a');
+    expect(wolf, 'the displaced monster must still exist').toBeDefined();
+    expect(wolf!.hp, 'it must have regenerated on its way home').toBeGreaterThan(100);
+    expect(wolf!.pos, 'and advanceCamps must have returned it, not the original object').not.toBe(
+      undefined,
+    );
+    expect(state.campMembers.length, 'a due camp must repopulate').toBeGreaterThan(0);
+    expect(before.traps).toBe(1);
+    expect(state.traps.length, 'the trap must be sprung or expired, not carried').toBe(0);
+    expect(before.p1Buffs).toBe(1);
+    expect(state.buffs.p1.buffs.length, 'a lapsed buff must be dropped').toBe(0);
+    expect(state.buffs.p2.buffs.length, 'a live buff must be kept').toBe(1);
+    expect(before.warden).not.toBeNull();
+    expect(state.wardenCharges.ally, 'a lapsed warden charge must clear').toBeNull();
+  });
+
+  it('reproduces all six exactly across a forced resimulation', () => {
+    const firing: ChampsInput = { moveTo: { x: 320, y: 300 }, cast: true };
+    const session = new RollbackSession(seeded(), {
+      participants: PARTICIPANTS,
+      maxRollbackTicks: 240,
+    });
+
+    // Confirm every tick but ONE, and make the withheld input differ from its neighbours — a repeat-shaped input is
+    // predicted correctly and would measure zero resimulated ticks.
+    const WITHHELD = 12;
+    for (let tick = 0; tick < 90; tick += 1) {
+      if (tick === WITHHELD) continue;
+      for (const id of PARTICIPANTS) {
+        session.applyRemoteInput(id, tick, tick % 3 === 0 ? firing : { moveTo: null, cast: false });
+      }
+      session.advanceTo(tick + 1);
+    }
+    const predicted = session.peek();
+
+    session.applyRemoteInput('p1', WITHHELD, firing);
+    session.applyRemoteInput('p2', WITHHELD, firing);
+    session.advanceTo(90);
+    const resimulated = session.peek();
+
+    const reference = seeded();
+    let expected = reference.initial();
+    for (let tick = 0; tick < 90; tick += 1) {
+      const inputs = new Map<string, ChampsInput>();
+      for (const id of PARTICIPANTS) {
+        inputs.set(id, tick === WITHHELD || tick % 3 === 0 ? firing : { moveTo: null, cast: false });
+      }
+      expected = reference.step(expected, inputs, tick);
+    }
+
+    expect(resimulated).toEqual(expected);
+
+    /**
+     * And the rewind must actually have CHANGED something, or the equality above is satisfied by a simulation that does
+     * nothing. The withheld input differs from its neighbours precisely so the predicted and resimulated states diverge.
+     */
+    expect(resimulated).not.toEqual(predicted);
+    expect(resimulated.campMembers.length, 'the scenario must reach the camp code at all').toBeGreaterThan(0);
+  });
+});
