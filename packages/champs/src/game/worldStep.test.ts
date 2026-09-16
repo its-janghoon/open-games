@@ -471,6 +471,7 @@ describe('cloneWorldState', () => {
         economy: {},
         progression: {},
         buffs: {},
+        lives: {},
       });
     });
 
@@ -550,6 +551,7 @@ describe('cloneWorldState', () => {
         'cooldowns',
         'dragonStacks',
         'economy',
+        'lives',
         'nextInsertionOrder',
         'outcome',
         'passives',
@@ -569,7 +571,6 @@ describe('cloneWorldState', () => {
         'campMembers',
         'camps',
         'effects',
-        'lives',
         'minions',
         'moveGoals',
         'objectives',

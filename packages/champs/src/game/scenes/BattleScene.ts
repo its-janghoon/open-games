@@ -406,7 +406,7 @@ function worldLengthToScreen(world: number): number {
  * `present` uses the champion life phase rather than `!dead`, matching the original ally filter — a respawning champion is
  * not dead but is not a valid heal target either.
  */
-function castActorFor(entity: Entity): CastActor {
+function castActorFor(entity: Entity, life: ChampionLifeState | undefined): CastActor {
   return {
     id: entity.unit.id,
     team: entity.unit.team,
@@ -414,7 +414,9 @@ function castActorFor(entity: Entity): CastActor {
     hp: entity.unit.hp,
     maxHp: entity.unit.maxHp,
     abilityPower: entity.abilityPower ?? 0,
-    present: entity.life ? isChampionPresent(entity.life) : !entity.unit.dead,
+    // Passed in rather than read off the entity: champion life lives in `world.lives` now, and a module-level helper has
+    // no way to reach it. An entity with no life entry is not a champion, and for those `!dead` is the whole question.
+    present: life ? isChampionPresent(life) : !entity.unit.dead,
   };
 }
 
@@ -531,7 +533,6 @@ interface Entity {
   /** For minions/monsters, their bounty type key. */
   minionType?: MinionType;
   /** Champion-only deterministic death/respawn state. */
-  life?: ChampionLifeState;
   /** Champion-only source data and finite pose state. */
   champion?: Champion;
   championPose?: ChampionPose;
@@ -1617,7 +1618,6 @@ export default class BattleScene extends Phaser.Scene {
       heightPx,
       stunned: 0,
       effects: createEffectState(),
-      life: createChampionLifeState(),
       champion,
       championPose: 'idle',
       poseLockedUntil: 0,
@@ -1627,6 +1627,9 @@ export default class BattleScene extends Phaser.Scene {
       abilityPower: 0,
     };
     this.attachHpBar(entity, size.height + 12);
+    // Champion life goes into `world.lives` rather than onto the entity. An entity with no entry is not a champion, which
+    // is what every `lifeFor(...) ? ... : ...` check downstream relies on, so this seeding is what keeps that true.
+    this.world.lives[unit.id] = createChampionLifeState();
     this.addEntity(entity);
     return entity;
   }
@@ -1670,7 +1673,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private refreshChampionLocomotionPoses(): void {
     for (const champion of this.champions) {
-      if (!isChampionPresent(champion.life!)) continue;
+      if (!isChampionPresent(this.lifeFor(champion)!)) continue;
       if (this.world.simTime < (champion.poseLockedUntil ?? 0)) continue;
       this.setChampionPose(champion, champion.movedThisFrame ? 'move' : 'idle');
     }
@@ -2234,6 +2237,17 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   /**
+   * This entity's champion life phase, from the one Record the snapshot carries, or undefined when it has none.
+   *
+   * Undefined is meaningful and deliberately preserved: minions, structures and monsters have no life phase, and the
+   * scene's existing `entity.life ? ... : !entity.unit.dead` checks depended on the absence. A champion is given an entry
+   * when it spawns, so "no entry" continues to mean "not a champion" rather than "champion we have not seen yet".
+   */
+  private lifeFor(entity: Entity): ChampionLifeState | undefined {
+    return this.world.lives[entity.unit.id];
+  }
+
+  /**
    * This entity's jungle buffs, from the one Record the snapshot carries.
    *
    * Every champion is keyed by unit id, including the human. The old arrangement keyed the player as the literal
@@ -2308,7 +2322,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   private startRecall() {
-    if (!isChampionPresent(this.player.life!) || this.inBase(this.player.unit, 'ally')) return;
+    if (!isChampionPresent(this.lifeFor(this.player)!) || this.inBase(this.player.unit, 'ally')) return;
     this.world.recalls[this.player.unit.id] = this.world.simTime;
     this.recallCancellation = '';
     this.playerOrder = 'stop';
@@ -2355,7 +2369,7 @@ export default class BattleScene extends Phaser.Scene {
       const bot = entity.bot;
       if (!bot) continue;
       this.world.economy[entity.unit.id] = advanceGold(this.economyFor(entity), dt);
-      if (!this.inBase(entity.unit, bot.side) || !isChampionPresent(entity.life!)) continue;
+      if (!this.inBase(entity.unit, bot.side) || !isChampionPresent(this.lifeFor(entity)!)) continue;
       const item = recommendPurchase(bot.champion.role, this.economyFor(entity).gold, bot.ownedItems);
       if (!item) continue;
       const purchase = attemptPurchase({
@@ -2565,7 +2579,7 @@ export default class BattleScene extends Phaser.Scene {
       if (e.stunned > 0) e.stunned = Math.max(0, e.stunned - dt);
       advanceAttackCooldown(e.unit, dt);
     }
-    if (isChampionPresent(this.player.life!)) {
+    if (isChampionPresent(this.lifeFor(this.player)!)) {
       applyHeal(this.player.unit, (this.player.hpRegen ?? 0) * dt);
       if (this.inBase(this.player.unit, 'ally')) {
         applyHeal(this.player.unit, this.player.unit.maxHp * 0.08 * dt);
@@ -2575,7 +2589,7 @@ export default class BattleScene extends Phaser.Scene {
     // Every AI champion regenerates from effective level/item stats, plus a
     // strong fountain heal when it is home.
     for (const c of this.champions) {
-      if (!c.bot || !isChampionPresent(c.life!)) continue;
+      if (!c.bot || !isChampionPresent(this.lifeFor(c)!)) continue;
       applyHeal(c.unit, (c.hpRegen ?? 0) * dt);
       if (this.inBase(c.unit, c.bot.side)) {
         applyHeal(c.unit, c.unit.maxHp * 0.08 * dt);
@@ -2586,7 +2600,7 @@ export default class BattleScene extends Phaser.Scene {
 
   private updatePlayerMovement(dt: number) {
     const u = this.player.unit;
-    if (!isChampionPresent(this.player.life!)) return;
+    if (!isChampionPresent(this.lifeFor(this.player)!)) return;
     if (this.player.stunned > 0 || this.playerOrder === 'stop') return;
 
     if (this.playerOrder === 'target') {
@@ -2630,7 +2644,7 @@ export default class BattleScene extends Phaser.Scene {
   private updateBotChampion(bot: Entity, dt: number) {
     const u = bot.unit;
     const state = bot.bot!;
-    if (!isChampionPresent(bot.life!)) return;
+    if (!isChampionPresent(this.lifeFor(bot)!)) return;
     if (bot.stunned > 0) return;
 
     const objective = this.objectiveForBot(bot);
@@ -2785,7 +2799,7 @@ export default class BattleScene extends Phaser.Scene {
     const dist = target ? distance(u.pos, target.pos) : Infinity;
     const [q, w, e, r] = state.champion.abilities;
     const nearbyChampions = this.champions.filter(
-      (entity) => isChampionPresent(entity.life!) && distance(entity.unit.pos, u.pos) <= 650,
+      (entity) => isChampionPresent(this.lifeFor(entity)!) && distance(entity.unit.pos, u.pos) <= 650,
     );
     const nearbyMinions = this.minions.filter(
       (entity) => !entity.unit.dead && distance(entity.unit.pos, u.pos) <= 600,
@@ -2990,7 +3004,7 @@ export default class BattleScene extends Phaser.Scene {
   private tryPlayerCast(slot: CooldownKey) {
     if (
       this.matchEnded || this.pauseReasons.size > 0 || this.hasModalFocus() ||
-      !isChampionPresent(this.player.life!) || this.player.stunned > 0
+      !isChampionPresent(this.lifeFor(this.player)!) || this.player.stunned > 0
     ) return;
     this.cancelRecall('ability');
     const pointer = this.input.activePointer;
@@ -3000,7 +3014,7 @@ export default class BattleScene extends Phaser.Scene {
   private tryPlayerCastAt(slot: CooldownKey, aim: Vec2) {
     if (
       this.matchEnded || this.pauseReasons.size > 0 || this.hasModalFocus() ||
-      !isChampionPresent(this.player.life!) || this.player.stunned > 0
+      !isChampionPresent(this.lifeFor(this.player)!) || this.player.stunned > 0
     ) return;
     this.cancelRecall('ability');
     // Aim has already been converted to the flat authoritative plane.
@@ -3018,7 +3032,7 @@ export default class BattleScene extends Phaser.Scene {
       .filter(
         (ally) =>
           ally.unit.team === caster.unit.team &&
-          isChampionPresent(ally.life!) &&
+          isChampionPresent(this.lifeFor(ally)!) &&
           distance(ally.unit.pos, caster.unit.pos) <= ability.range &&
           distance(ally.unit.pos, aim) <= 90,
       )
@@ -3034,7 +3048,7 @@ export default class BattleScene extends Phaser.Scene {
       .filter(
         (ally) =>
           ally.unit.team === caster.unit.team &&
-          isChampionPresent(ally.life!) &&
+          isChampionPresent(this.lifeFor(ally)!) &&
           distance(ally.unit.pos, caster.unit.pos) <= ability.range,
       )
       .sort(
@@ -3048,7 +3062,7 @@ export default class BattleScene extends Phaser.Scene {
     const side = caster.unit.team;
     const candidates = this.champions
       .filter(
-        (ally) => ally.unit.team === side && isChampionPresent(ally.life!) &&
+        (ally) => ally.unit.team === side && isChampionPresent(this.lifeFor(ally)!) &&
           distance(ally.unit.pos, caster.unit.pos) <= (champion.id === 'dawnsong' ? 600 : 650),
       )
       .sort(
@@ -3158,8 +3172,8 @@ export default class BattleScene extends Phaser.Scene {
       slot,
       ability,
       effect,
-      caster: castActorFor(caster),
-      everyone: this.champions.map(castActorFor),
+      caster: castActorFor(caster, this.lifeFor(caster)),
+      everyone: this.champions.map((entity) => castActorFor(entity, this.lifeFor(entity))),
       origin,
       endpoint,
       aimedAllyId: aimedAlly?.unit.id ?? null,
@@ -3362,9 +3376,9 @@ export default class BattleScene extends Phaser.Scene {
 
   private advanceChampionLives() {
     for (const entity of this.champions) {
-      const previous = entity.life!;
+      const previous = this.lifeFor(entity)!;
       const next = advanceChampionLife(previous, this.world.simTime, this.mode);
-      entity.life = next;
+      this.world.lives[entity.unit.id] = next;
       if (!isChampionPresent(next)) {
         entity.unit.dead = true;
         const showingDeathPose =
@@ -3716,7 +3730,8 @@ export default class BattleScene extends Phaser.Scene {
 
   private isEntityDamageable(entity: Entity): boolean {
     if (entity.unit.dead) return false;
-    return entity.life ? isChampionDamageable(entity.life) : true;
+    const life = this.lifeFor(entity);
+    return life ? isChampionDamageable(life) : true;
   }
 
   private applyTargetedDamage(
@@ -3829,11 +3844,12 @@ export default class BattleScene extends Phaser.Scene {
     const sourceEntity = this.entityForUnit(source);
     const sourceSide = source.team === 'ally' || source.team === 'enemy' ? source.team : null;
 
-    if (targetEntity?.life) {
+    const targetLife = targetEntity ? this.lifeFor(targetEntity) : undefined;
+    if (targetEntity && targetLife) {
       const level = targetEntity === this.player
         ? this.progressionFor(targetEntity).level
         : this.progressionFor(targetEntity).level;
-      targetEntity.life = killChampion(targetEntity.life, this.world.simTime, level, this.mode);
+      this.world.lives[targetEntity.unit.id] = killChampion(targetLife, this.world.simTime, level, this.mode);
       if (targetEntity.champion?.id === 'duskarrow') {
         this.world.passives = {
           counters: { ...this.world.passives.counters, [passiveKeys.duskarrowDistance(target.id)]: 0 },
@@ -4748,15 +4764,15 @@ export default class BattleScene extends Phaser.Scene {
         Math.ceil((this.world.wardenCharges.ally?.expiresAt ?? this.world.simTime) - this.world.simTime),
       ),
       playerLife: {
-        phase: this.player.life!.phase,
+        phase: this.lifeFor(this.player)!.phase,
         deaths: this.playerDeaths,
         respawnSeconds:
-          this.player.life!.phase === 'dead' || this.player.life!.phase === 'respawning'
-            ? Math.round(championLifeTimerRemaining(this.player.life!, this.world.simTime) * 10) / 10
+          this.lifeFor(this.player)!.phase === 'dead' || this.lifeFor(this.player)!.phase === 'respawning'
+            ? Math.round(championLifeTimerRemaining(this.lifeFor(this.player)!, this.world.simTime) * 10) / 10
             : 0,
         invulnerableSeconds:
-          this.player.life!.phase === 'invulnerable'
-            ? Math.round(championLifeTimerRemaining(this.player.life!, this.world.simTime) * 10) / 10
+          this.lifeFor(this.player)!.phase === 'invulnerable'
+            ? Math.round(championLifeTimerRemaining(this.lifeFor(this.player)!, this.world.simTime) * 10) / 10
             : 0,
       },
       matchStatus: {
