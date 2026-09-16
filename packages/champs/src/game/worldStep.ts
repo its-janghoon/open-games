@@ -34,6 +34,7 @@ import type { BaronBuffState } from './rift/objectives';
 import type { WardenCharge } from './wardenPolicy';
 import {
   cloneTeamFacts,
+  ongoing,
   type MatchOutcome,
   type RecallTable,
   type TeamFactsTable,
@@ -412,12 +413,7 @@ export function cloneWorldState(state: WorldState): WorldState {
       Object.entries(state.structures).map(([id, structure]) => [id, { ...structure }]),
     ),
     minions: cloneMinions(state.minions),
-    recalls: { ...state.recalls },
     teamFacts: cloneTeamFacts(state.teamFacts),
-    // Spread rather than shared: the union's payload is strings today, and sharing would leak a rewritten winner back
-    // into a snapshot the rollback still needs. Asserted in the clone contract in this same commit, which is the rule
-    // the previous five record fields each had to learn by injection.
-    outcome: { ...state.outcome },
     autoAttackers: cloneAutoAttackers(state.autoAttackers),
     resources: cloneResources(state.resources),
     traps: cloneTraps(state.traps),
@@ -470,6 +466,8 @@ export type AdoptedWorld = Pick<
   | 'dragonStacks'
   | 'pendingImpacts'
   | 'waves'
+  | 'outcome'
+  | 'recalls'
 >;
 
 /** The adopted slice at match start. */
@@ -485,6 +483,8 @@ export function createAdoptedWorld(): AdoptedWorld {
     dragonStacks: { ally: 0, enemy: 0 },
     pendingImpacts: [],
     waves: initialWaveSchedule(),
+    outcome: ongoing(),
+    recalls: {},
   };
 }
 
@@ -507,6 +507,10 @@ export function cloneAdoptedWorld(world: AdoptedWorld): AdoptedWorld {
     dragonStacks: { ...world.dragonStacks },
     pendingImpacts: world.pendingImpacts.map(cloneImpact),
     waves: cloneWaveSchedule(world.waves),
+    // Spread rather than shared: the union's payload is strings today, and sharing would leak a rewritten winner back
+    // into a snapshot the rollback still needs.
+    outcome: { ...world.outcome },
+    recalls: { ...world.recalls },
   };
 }
 

@@ -459,6 +459,8 @@ describe('cloneWorldState', () => {
         dragonStacks: { ally: 0, enemy: 0 },
         pendingImpacts: [],
         waves: { spawnedWaves: 0, pending: [], nextOrder: 0 },
+        outcome: { kind: 'ongoing' },
+        recalls: {},
       });
     });
 
@@ -536,8 +538,10 @@ describe('cloneWorldState', () => {
         'baron',
         'dragonStacks',
         'nextInsertionOrder',
+        'outcome',
         'passives',
         'pendingImpacts',
+        'recalls',
         'simTime',
         'targets',
         'tick',
@@ -556,8 +560,6 @@ describe('cloneWorldState', () => {
         'minions',
         'moveGoals',
         'objectives',
-        'outcome',
-        'recalls',
         'resources',
         'structures',
         'teamFacts',
